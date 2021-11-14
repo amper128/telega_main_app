@@ -12,6 +12,7 @@ file(GLOB_RECURSE app_headers "include/*.h")
 
 add_executable(${PROJECT_NAME}
 	main.c
+	motion.c
 	video.c
 	${app_headers}
 	)
