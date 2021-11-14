@@ -100,7 +100,7 @@ static void
 parse_msg(const struct can_packet_t *msg)
 {
 	switch (msg->msg.cmd) {
-	case VESC_CAN_PACKET_STATUS: {
+	case (uint8_t)VESC_CAN_PACKET_STATUS: {
 		union {
 			const struct {
 				uint32_t rpm;
@@ -117,7 +117,7 @@ parse_msg(const struct can_packet_t *msg)
 		break;
 	}
 
-	case VESC_CAN_PACKET_STATUS_2: {
+	case (uint8_t)VESC_CAN_PACKET_STATUS_2: {
 		union {
 			const struct {
 				uint32_t ah_X10000;
@@ -133,7 +133,7 @@ parse_msg(const struct can_packet_t *msg)
 		break;
 	}
 
-	case VESC_CAN_PACKET_STATUS_3: {
+	case (uint8_t)VESC_CAN_PACKET_STATUS_3: {
 		union {
 			const struct {
 				uint32_t wh_X10000;
@@ -149,7 +149,7 @@ parse_msg(const struct can_packet_t *msg)
 		break;
 	}
 
-	case VESC_CAN_PACKET_STATUS_4: {
+	case (uint8_t)VESC_CAN_PACKET_STATUS_4: {
 		union {
 			const struct {
 				uint16_t temp_fet_X10;
@@ -169,7 +169,7 @@ parse_msg(const struct can_packet_t *msg)
 		break;
 	}
 
-	case VESC_CAN_PACKET_STATUS_5: {
+	case (uint8_t)VESC_CAN_PACKET_STATUS_5: {
 		union {
 			const struct {
 				uint32_t tacho_value;
