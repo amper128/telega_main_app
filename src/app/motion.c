@@ -14,28 +14,88 @@
 
 #include <private/motion.h>
 
-#define bswap16(x) ((x) >> 8 | ((x)&255) << 8)
-
-static inline int32_t
-bswap32(int32_t x)
+/**
+ * @brief чтение двухбайтового целого
+ * @param data [in] данные из сообщения
+ * @retval сконвертированное значение
+ */
+__attribute__((used)) static inline int16_t
+vesc_read_i16(const uint16_t data)
 {
 	union {
-		const int32_t *i;
-		const uint32_t *u;
-	} u1;
+		uint16_t u;
+		int16_t i;
+	} u;
 
-	union {
-		int32_t i;
-		uint32_t u;
-	} u2;
+	u.u = __bswap_constant_16(data);
 
-	u1.i = &x;
-
-	u2.u = __bswap_constant_32(*u1.u);
-
-	return u2.i;
+	return u.i;
 }
 
+/**
+ * @brief чтение четырехбайтового целого
+ * @param data [in] данные из сообщения
+ * @retval сконвертированное значение
+ */
+static inline int32_t
+vesc_read_i32(const uint32_t data)
+{
+	union {
+		uint32_t u;
+		int32_t i;
+	} u;
+
+	u.u = __bswap_constant_32(data);
+
+	return u.i;
+}
+
+/**
+ * @brief чтение двухбайтового значения с делителем
+ * @param data [in] данные из сообщения
+ * @param div [in] делитель
+ * @retval сконвертированное значение
+ */
+static inline double
+vesc_read_float2(const uint16_t data, double div)
+{
+	union {
+		uint16_t u;
+		int16_t i;
+	} u;
+
+	u.u = __bswap_constant_16(data);
+
+	double f = (double)u.i;
+
+	return f / div;
+}
+
+/**
+ * @brief чтение четырехбайтового значения с делителем
+ * @param data [in] данные из сообщения
+ * @param div [in] делитель
+ * @retval сконвертированное значение
+ */
+static inline double
+vesc_read_float4(const uint32_t data, double div)
+{
+	union {
+		uint16_t u;
+		int16_t i;
+	} u;
+
+	u.u = __bswap_constant_16(data);
+
+	double f = (double)u.i;
+
+	return f / div;
+}
+
+/**
+ * @brief разбор сообщений протокола
+ * @param msg [in] данные сообщения
+ */
 static void
 parse_msg(const struct can_packet_t *msg)
 {
@@ -43,85 +103,85 @@ parse_msg(const struct can_packet_t *msg)
 	case VESC_CAN_PACKET_STATUS: {
 		union {
 			const struct {
-				int32_t rpm;
-				int16_t current_X10;
-				int16_t duty_X1000;
+				uint32_t rpm;
+				uint16_t current_X10;
+				uint16_t duty_X1000;
 			} * status;
 			const uint8_t *p8;
 		} u;
 
 		u.p8 = msg->data;
-		log_inf("rpm: %i, current: %.1f, duty: %.3f", bswap32(u.status->rpm),
-			(double)bswap16(u.status->current_X10) / 10.0,
-			(double)bswap16(u.status->duty_X1000) / 1000.0);
+		log_inf("rpm: %i, current: %.1f, duty: %.3f", vesc_read_i32(u.status->rpm),
+			vesc_read_float2(u.status->current_X10, 10.0),
+			vesc_read_float2(u.status->duty_X1000, 1000.0));
 		break;
 	}
 
 	case VESC_CAN_PACKET_STATUS_2: {
 		union {
 			const struct {
-				int32_t ah_X10000;
-				int32_t ahch_X10000;
+				uint32_t ah_X10000;
+				uint32_t ahch_X10000;
 			} * status2;
 			const uint8_t *p8;
 		} u;
 
 		u.p8 = msg->data;
 		log_inf("consumed: %.4f ah, charged: %.4f ah",
-			(double)bswap32(u.status2->ah_X10000) / 10000.0,
-			(double)bswap32(u.status2->ahch_X10000) / 10000.0);
+			vesc_read_float4(u.status2->ah_X10000, 10000.0),
+			vesc_read_float4(u.status2->ahch_X10000, 10000.0));
 		break;
 	}
 
 	case VESC_CAN_PACKET_STATUS_3: {
 		union {
 			const struct {
-				int32_t wh_X10000;
-				int32_t whch_X10000;
+				uint32_t wh_X10000;
+				uint32_t whch_X10000;
 			} * status3;
 			const uint8_t *p8;
 		} u;
 
 		u.p8 = msg->data;
 		log_inf("consumed: %.4f wh, charged: %.4f wh",
-			(double)bswap32(u.status3->wh_X10000) / 10000.0,
-			(double)bswap32(u.status3->whch_X10000) / 10000.0);
+			vesc_read_float4(u.status3->wh_X10000, 10000.0),
+			vesc_read_float4(u.status3->whch_X10000, 10000.0));
 		break;
 	}
 
 	case VESC_CAN_PACKET_STATUS_4: {
 		union {
 			const struct {
-				int16_t temp_fet_X10;
-				int16_t temp_motor_X10;
-				int16_t current_in_X10;
-				int16_t pid_pos_now_X50;
+				uint16_t temp_fet_X10;
+				uint16_t temp_motor_X10;
+				uint16_t current_in_X10;
+				uint16_t pid_pos_now_X50;
 			} * status4;
 			const uint8_t *p8;
 		} u;
 
 		u.p8 = msg->data;
 		log_inf("temp_fet: %.1f, temp_motor: %.1f, current_in: %.1f, pid_pos: %.2f",
-			(double)bswap16(u.status4->temp_fet_X10) / 10.0,
-			(double)bswap16(u.status4->temp_motor_X10) / 10.0,
-			(double)bswap16(u.status4->current_in_X10) / 10.0,
-			(double)bswap16(u.status4->pid_pos_now_X50) / 50.0);
+			vesc_read_float2(u.status4->temp_fet_X10, 10.0),
+			vesc_read_float2(u.status4->temp_motor_X10, 10.0),
+			vesc_read_float2(u.status4->current_in_X10, 10.0),
+			vesc_read_float2(u.status4->pid_pos_now_X50, 50.0));
 		break;
 	}
 
 	case VESC_CAN_PACKET_STATUS_5: {
 		union {
 			const struct {
-				int32_t tacho_value;
-				int16_t v_in_X10;
-				int16_t reserved;
+				uint32_t tacho_value;
+				uint16_t v_in_X10;
+				uint16_t reserved;
 			} * status5;
 			const uint8_t *p8;
 		} u;
 
 		u.p8 = msg->data;
-		log_inf("tacho: %i, v_in: %.1f", bswap32(u.status5->tacho_value),
-			(double)bswap16(u.status5->v_in_X10) / 10.0);
+		log_inf("tacho: %i, v_in: %.1f", vesc_read_i32(u.status5->tacho_value),
+			vesc_read_float2(u.status5->v_in_X10, 10.0));
 		break;
 	}
 
