@@ -136,7 +136,7 @@ do_motion()
 {
 	struct can_packet_t msg;
 
-	if (read_can_msg(&msg)) {
+	while (read_can_msg(&msg)) {
 		parse_msg(&msg);
 	}
 }
