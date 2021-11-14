@@ -30,7 +30,7 @@ struct log_record_t {
 	char msg[LOG_ITEM_MAXMSG];
 };
 
-#define LOG_BUFFER_SIZE (64U)
+#define LOG_BUFFER_SIZE (1024U)
 
 typedef struct {
 	uint32_t head;
