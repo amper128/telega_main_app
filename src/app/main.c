@@ -92,9 +92,7 @@ start_microservices(void)
 	static const struct {
 		svc_desc_t svc[SERVICES_MAX];
 		size_t count;
-	} svc_start_list = {
-	    {{"video", video_init, video_main, 0ULL}},
-	    1U};
+	} svc_start_list = {{{"video", video_init, video_main, 0ULL}}, 1U};
 
 	size_t i;
 

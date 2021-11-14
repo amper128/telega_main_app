@@ -32,7 +32,7 @@ typedef unsigned long ulong;
 		struct packed_dummy_struct {                                                       \
 			typeof(*(p)) __val;                                                        \
 		} __attribute__((packed)) *__ptr = (void *)(p);                                    \
-												   \
+                                                                                                   \
 		__ptr->__val;                                                                      \
 	})
 
