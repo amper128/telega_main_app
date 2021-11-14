@@ -6,13 +6,40 @@
  * @brief Функции управления движением
  */
 
+#include <arpa/inet.h>
 #include <byteswap.h>
+#include <fcntl.h>
+
 #include <io/canbus.h>
 #include <log/log.h>
 #include <svc/sharedmem.h>
 #include <svc/svc.h>
 
 #include <private/motion.h>
+
+#define RC_PORT (5565)
+
+/**
+ * @brief ограничение значения в указанных пределах
+ * @param val [in] исходное значение
+ * @param max [in] верхний предел
+ * @param min [in] нижний предел
+ * @retval ограниченное значение
+ */
+static inline float
+flimit(float val, float max, float min)
+{
+	float result = val;
+
+	if (result > max) {
+		result = max;
+	}
+	if (result < min) {
+		result = min;
+	}
+
+	return result;
+}
 
 /**
  * @brief чтение двухбайтового целого
@@ -90,6 +117,25 @@ vesc_read_float4(const uint32_t data, double div)
 	double f = (double)u.i;
 
 	return f / div;
+}
+
+static inline void
+vesc_write_i32(const int32_t data, uint8_t *dest)
+{
+	union {
+		const uint32_t *u;
+		const int32_t *i;
+	} u;
+
+	u.i = &data;
+
+	union {
+		uint32_t u;
+		uint8_t u8[4];
+	} v;
+
+	v.u = __bswap_constant_32(*u.u);
+	memcpy(dest, v.u8, 4U);
 }
 
 /**
@@ -192,13 +238,36 @@ parse_msg(const struct can_packet_t *msg)
 }
 
 static void
-do_motion()
+set_drv_duty(uint8_t drv_id, float duty)
+{
+	float d = flimit(duty, 1.0f, -1.0f);
+
+	struct can_packet_t msg = {
+	    0,
+	};
+
+	msg.hdr.cmd = (uint8_t)VESC_CAN_PACKET_SET_DUTY;
+	msg.hdr.id = drv_id;
+
+	int32_t conv = (int32_t)(d * 100000.0f);
+	vesc_write_i32(conv, msg.data);
+	msg.len = sizeof(conv);
+	send_can_msg(&msg);
+}
+
+static void
+do_motion(float speed, float steering)
 {
 	struct can_packet_t msg;
 
 	while (read_can_msg(&msg)) {
 		parse_msg(&msg);
 	}
+
+	(void)speed;
+	(void)steering;
+
+	set_drv_duty(0U, speed);
 }
 
 int
@@ -210,13 +279,65 @@ motion_init(void)
 int
 motion_main(void)
 {
-	if (can_init() < 0) {
-		return 1;
-	}
+	int result = 0;
 
-	while (svc_cycle()) {
-		do_motion();
-	}
+	do {
+		if (can_init() < 0) {
+			result = -1;
+			break;
+		}
 
-	return 0;
+		struct sockaddr_in rc_sockaddr;
+		int rc_sock;
+		socklen_t slen_rc = sizeof(rc_sockaddr);
+		rc_sockaddr.sin_family = AF_INET;
+		rc_sockaddr.sin_port = htons(RC_PORT);
+		rc_sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+		memset(rc_sockaddr.sin_zero, '\0', sizeof(rc_sockaddr.sin_zero));
+
+		if ((rc_sock = socket(PF_INET, SOCK_DGRAM, 0)) == -1) {
+			log_err("Could not create UDP socket!");
+			break;
+		}
+
+		if (bind(rc_sock, (struct sockaddr *)&rc_sockaddr, sizeof(struct sockaddr)) == -1) {
+			log_err("bind()");
+			break;
+		}
+
+		int flags = fcntl(rc_sock, F_GETFL, 0);
+		fcntl(rc_sock, F_SETFL, flags | O_NONBLOCK);
+
+		float speed = 0.0f;
+		float steering = 0.0f;
+
+		while (svc_cycle()) {
+			uint8_t rc_data[512];
+			int data_len = recvfrom(rc_sock, rc_data, 512U, 0,
+						(struct sockaddr *)&rc_sockaddr, &slen_rc);
+			if (data_len > 0) {
+				struct _r {
+					uint32_t seqno;
+					int16_t res;
+					int16_t axis[4];
+					int16_t data[4];
+					int8_t sq;
+				};
+
+				union {
+					struct _r *r;
+					uint8_t *u8;
+				} r;
+
+				r.u8 = rc_data;
+
+				speed = (float)r.r->axis[1] / 500.0f;
+				steering = (float)r.r->axis[0] / 500.0f;
+			}
+
+			do_motion(speed, steering);
+		}
+	} while (0);
+
+	return result;
 }
