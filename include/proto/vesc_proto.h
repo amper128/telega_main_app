@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 typedef struct {
-	uint8_t cmd;
 	uint8_t id;
-	uint8_t data[8U];
+	uint8_t cmd;
+	uint8_t __reserved[2U];
 } __attribute__((packed)) can_msg_t;
