@@ -13,6 +13,7 @@
  *
  */
 
+#include <private/video.h>
 #include <gst/gst.h>
 #include <stdbool.h>
 
@@ -23,7 +24,14 @@
 #define FEC_PERCENT (25)
 
 int
-main(int argc, char *argv[])
+video_init(void)
+{
+	/* do nothing */
+	return 0;
+}
+
+int
+video_main(void)
 {
 	GstElement *pipeline, *source, *caps, *ratec, *udpsink;
 	GstBus *bus;
@@ -38,7 +46,7 @@ main(int argc, char *argv[])
 	GstStateChangeReturn ret;
 
 	/* Initialize GStreamer */
-	gst_init (&argc, &argv);
+	gst_init(NULL, NULL);
 
 	/* Create the elements */
 	source		= gst_element_factory_make ("nvarguscamerasrc", "source");

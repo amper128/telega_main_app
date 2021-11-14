@@ -1,21 +1,6 @@
-#
-# sources
-#
+add_subdirectory(libio)
+add_subdirectory(liblog)
+add_subdirectory(libnetlink)
+add_subdirectory(libsvc)
 
-find_package(PkgConfig)
-pkg_search_module(GLIB REQUIRED glib-2.0)
-pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
-pkg_check_modules(GST_APP REQUIRED gstreamer-app-1.0)
-pkg_check_modules(GST_VIDEO REQUIRED gstreamer-video-1.0)
-
-add_executable(${PROJECT_NAME}
-	main.c
-	)
-
-target_include_directories(${PROJECT_NAME}
-	PRIVATE
-		${GLIB2_INCLUDE_DIRS}
-		${GSTREAMER_INCLUDE_DIRS}
-	)
-
-target_link_libraries(${PROJECT_NAME} ${GST_APP_LIBRARIES} ${GST_VIDEO_LIBRARIES})
+add_subdirectory(app)
