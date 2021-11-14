@@ -11,7 +11,7 @@
 #include <proto/vesc_proto.h>
 
 struct can_packet_t {
-	can_msg_t msg;
+	can_hdr_t hdr;
 	uint8_t len;
 	uint8_t data[8];
 };

@@ -45,4 +45,4 @@ typedef struct {
 	uint8_t id;
 	uint8_t cmd;
 	uint8_t __reserved[2U];
-} __attribute__((packed)) can_msg_t;
+} __attribute__((packed)) can_hdr_t;

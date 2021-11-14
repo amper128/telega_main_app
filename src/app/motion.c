@@ -99,7 +99,7 @@ vesc_read_float4(const uint32_t data, double div)
 static void
 parse_msg(const struct can_packet_t *msg)
 {
-	switch (msg->msg.cmd) {
+	switch (msg->hdr.cmd) {
 	case (uint8_t)VESC_CAN_PACKET_STATUS: {
 		union {
 			const struct {
@@ -186,7 +186,7 @@ parse_msg(const struct can_packet_t *msg)
 	}
 
 	default:
-		log_inf("recv: from=%X, cmd=%x, data_len=%u", msg->msg.id, msg->msg.cmd, msg->len);
+		log_inf("recv: from=%X, cmd=%x, data_len=%u", msg->hdr.id, msg->hdr.cmd, msg->len);
 		break;
 	}
 }

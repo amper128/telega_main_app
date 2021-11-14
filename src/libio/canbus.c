@@ -91,11 +91,11 @@ read_can_msg(struct can_packet_t *msg)
 
 			union {
 				canid_t *can_id;
-				can_msg_t *id;
+				can_hdr_t *id;
 			} id;
 			id.can_id = &frame.can_id;
 
-			memcpy(&msg->msg, id.id, sizeof(can_msg_t));
+			memcpy(&msg->hdr, id.id, sizeof(can_hdr_t));
 			msg->len = frame.can_dlc;
 			memcpy(msg->data, frame.data, msg->len);
 
@@ -120,11 +120,11 @@ send_can_msg(struct can_packet_t *msg)
 
 		union {
 			canid_t *can_id;
-			can_msg_t *id;
+			can_hdr_t *id;
 		} id;
 
 		id.can_id = &frame.can_id;
-		memcpy(id.id, &msg->msg, sizeof(can_msg_t));
+		memcpy(id.id, &msg->hdr, sizeof(can_hdr_t));
 		frame.can_id |= CAN_EFF_FLAG;
 
 		frame.can_dlc = msg->len;
