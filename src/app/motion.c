@@ -16,7 +16,96 @@
 static void
 parse_msg(const struct can_packet_t *msg)
 {
-	log_inf("recv: from=%X, cmd=%x, data_len=%u", msg->msg.id, msg->msg.cmd, msg->len);
+	switch (msg->msg.cmd) {
+	case VESC_CAN_PACKET_STATUS: {
+		union {
+			const struct {
+				int32_t rpm;
+				int16_t current_X10;
+				int16_t duty_X1000;
+			} * status;
+			const uint8_t *p8;
+		} u;
+
+		u.p8 = msg->data;
+		log_inf("rpm: %i, current: %.1f, duty: %.3f", u.status->rpm,
+			(double)u.status->current_X10 / 10.0,
+			(double)u.status->duty_X1000 / 1000.0);
+		break;
+	}
+
+	case VESC_CAN_PACKET_STATUS_2: {
+		union {
+			const struct {
+				int32_t ah_X10000;
+				int32_t ahch_X10000;
+			} * status2;
+			const uint8_t *p8;
+		} u;
+
+		u.p8 = msg->data;
+		log_inf("consumed: %.4f ah, charged: %.4f ah",
+			(double)u.status2->ah_X10000 / 10000.0,
+			(double)u.status2->ahch_X10000 / 10000.0);
+		break;
+	}
+
+	case VESC_CAN_PACKET_STATUS_3: {
+		union {
+			const struct {
+				int32_t wh_X10000;
+				int32_t whch_X10000;
+			} * status3;
+			const uint8_t *p8;
+		} u;
+
+		u.p8 = msg->data;
+		log_inf("consumed: %.4f wh, charged: %.4f wh",
+			(double)u.status3->wh_X10000 / 10000.0,
+			(double)u.status3->whch_X10000 / 10000.0);
+		break;
+	}
+
+	case VESC_CAN_PACKET_STATUS_4: {
+		union {
+			const struct {
+				int16_t temp_fet_X10;
+				int16_t temp_motor_X10;
+				int16_t current_in_X10;
+				int16_t pid_pos_now_X50;
+			} * status4;
+			const uint8_t *p8;
+		} u;
+
+		u.p8 = msg->data;
+		log_inf("temp_fet: %.1f, temp_motor: %.1f, current_in: %.1f, pid_pos: %.2f",
+			(double)u.status4->temp_fet_X10 / 10.0,
+			(double)u.status4->temp_motor_X10 / 10.0,
+			(double)u.status4->current_in_X10 / 10.0,
+			(double)u.status4->pid_pos_now_X50 / 50.0);
+		break;
+	}
+
+	case VESC_CAN_PACKET_STATUS_5: {
+		union {
+			const struct {
+				int32_t tacho_value;
+				int16_t v_in_X10;
+				int16_t reserved;
+			} * status5;
+			const uint8_t *p8;
+		} u;
+
+		u.p8 = msg->data;
+		log_inf("tacho: %i, v_in: %.1f", u.status5->tacho_value,
+			(double)u.status5->v_in_X10 / 10.0);
+		break;
+	}
+
+	default:
+		log_inf("recv: from=%X, cmd=%x, data_len=%u", msg->msg.id, msg->msg.cmd, msg->len);
+		break;
+	}
 }
 
 static void
