@@ -11,8 +11,11 @@ pkg_check_modules(GST_VIDEO REQUIRED gstreamer-video-1.0)
 file(GLOB_RECURSE app_headers "include/*.h")
 
 add_executable(${PROJECT_NAME}
+	gps.c
 	main.c
+	minmea.c
 	motion.c
+	telemetry.c
 	video.c
 	${app_headers}
 	)
