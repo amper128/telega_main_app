@@ -5,6 +5,7 @@
 file(GLOB_RECURSE libsvc_headers "include/*.h")
 
 add_library(svc
+	crc.c
 	sharedmem.c
 	svc.c
 	timerfd.c
