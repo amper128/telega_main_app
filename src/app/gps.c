@@ -269,7 +269,7 @@ gps_main(void)
 	char line[256];
 	size_t line_len = 0U;
 
-	int gps_fd = open_gps("/dev/serial1", 115200);
+	int gps_fd = open_gps("/dev/ttyACM0", 115200);
 	if (gps_fd < 0) {
 		return 0;
 	}
@@ -285,7 +285,7 @@ gps_main(void)
 
 		select(gps_fd + 1, &readfs, NULL, NULL, &tv);
 		if (FD_ISSET(gps_fd, &readfs)) {
-			int r = read(gps_fd, buffer, sizeof(buffer));
+			ssize_t r = read(gps_fd, buffer, sizeof(buffer));
 			if (r < 0) {
 				log_err("cannot read");
 				break;
