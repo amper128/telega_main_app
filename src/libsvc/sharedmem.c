@@ -1,8 +1,8 @@
 /**
- * @file main.c
+ * @file sharedmem.c
  * @author Алексей Хохлов <root@amper.me>
  * @copyright WTFPL License
- * @date 2020
+ * @date 2021
  * @brief Функции работы с общей памятью
  */
 
@@ -20,6 +20,8 @@
 
 #define SHM_START_IDX (0xFFFFFFFEU)
 
+#define SHM_PREFIX "SHM_RC_"
+
 typedef struct {
 	uint32_t index;
 	uint32_t size;
@@ -31,6 +33,7 @@ typedef struct {
 	uint32_t size;
 	uint32_t copies;
 	uint32_t index;
+	uint32_t __pad;
 
 	shm_slot_t slot[SHM_COPIES];
 } shm_header_t;
@@ -54,7 +57,7 @@ shm_map_init(const char name[], size_t size)
 
 	do {
 		char shm_name[256];
-		snprintf(shm_name, sizeof(shm_name), "/rhex_%s", name);
+		snprintf(shm_name, sizeof(shm_name), "/" SHM_PREFIX "%s", name);
 		int fd = shm_open(shm_name, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 		if (fd < 0) {
 			log_err("shm_open() \"%s\" error", name);
@@ -77,7 +80,7 @@ shm_map_init(const char name[], size_t size)
 
 		shm_header_t *header = map;
 		header->magic = SHM_MAGIC;
-		header->size = size;
+		header->size = (uint32_t)size;
 		header->copies = SHM_COPIES;
 		header->index = SHM_START_IDX;
 
@@ -102,7 +105,7 @@ shm_map_open(const char name[], shm_t *shm)
 
 	do {
 		char shm_name[256];
-		snprintf(shm_name, sizeof(shm_name), "/rhex_%s", name);
+		snprintf(shm_name, sizeof(shm_name), "/" SHM_PREFIX "%s", name);
 		int fd = shm_open(shm_name, O_RDWR, S_IRUSR | S_IWUSR);
 		if (fd < 0) {
 			log_err("shm_open() \"%s\" error", name);
@@ -151,26 +154,31 @@ shm_map_read(shm_t *shm, void **data)
 {
 	int32_t result = 0;
 
-	if (shm->guard != SHM_GUARD) {
-		log_err("shm guard error!");
-		result = -1;
-	} else {
+	do {
+		if (shm->guard != SHM_GUARD) {
+			log_err("shm guard error!");
+			result = -1;
+			break;
+		}
+
 		shm_header_t *hdr = shm->map;
 		if (hdr == NULL) {
-			log_err(NULL);
+			log_err("NULL header");
+			result = -1;
+			break;
 		}
 
 		uint32_t index = hdr->index;
-
 		size_t slot = index % SHM_COPIES;
 
 		union {
 			shm_header_t *h;
 			uint64_t *u64;
 		} p;
+
 		p.h = &hdr[1];
 		*data = &p.u64[(hdr->slot[slot].offset) / sizeof(uint64_t *)];
-	}
+	} while (false);
 
 	return result;
 }

@@ -313,8 +313,8 @@ motion_main(void)
 
 		while (svc_cycle()) {
 			uint8_t rc_data[512];
-			int data_len = recvfrom(rc_sock, rc_data, 512U, 0,
-						(struct sockaddr *)&rc_sockaddr, &slen_rc);
+			ssize_t data_len = recvfrom(rc_sock, rc_data, 512U, 0,
+						    (struct sockaddr *)&rc_sockaddr, &slen_rc);
 			if (data_len > 0) {
 				struct _r {
 					uint32_t seqno;
