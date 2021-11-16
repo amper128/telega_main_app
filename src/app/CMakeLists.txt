@@ -15,6 +15,7 @@ add_executable(${PROJECT_NAME}
 	main.c
 	minmea.c
 	motion.c
+	system_telemetry.c
 	telemetry.c
 	video.c
 	${app_headers}

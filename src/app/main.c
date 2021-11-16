@@ -16,6 +16,7 @@
 
 #include <private/gps.h>
 #include <private/motion.h>
+#include <private/system_telemetry.h>
 #include <private/telemetry.h>
 #include <private/video.h>
 
@@ -95,11 +96,13 @@ start_microservices(void)
 	static const struct {
 		svc_desc_t svc[SERVICES_MAX];
 		size_t count;
-	} svc_start_list = {{{"gps", gps_init, gps_main, 0ULL},
-			     {"motion", motion_init, motion_main, 10ULL * TIME_MS},
-			     {"telemetry", telemetry_init, telemetry_main, 100ULL * TIME_MS},
-			     {"video", video_init, video_main, 0ULL}},
-			    4U};
+	} svc_start_list = {
+	    {{"gps", gps_init, gps_main, 0ULL},
+	     {"motion", motion_init, motion_main, 10ULL * TIME_MS},
+	     {"sys_stat", system_telemetry_init, system_telemetry_main, 1ULL * TIME_S},
+	     {"telemetry", telemetry_init, telemetry_main, 100ULL * TIME_MS},
+	     {"video", video_init, video_main, 0ULL}},
+	    5U};
 
 	size_t i;
 

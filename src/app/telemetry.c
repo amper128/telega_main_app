@@ -17,10 +17,12 @@
 
 #include <private/gps.h>
 #include <private/sensors.h>
+#include <private/system_telemetry.h>
 #include <private/telemetry.h>
 
 static shm_t gps_shm;
 static shm_t sensors_shm;
+static shm_t sys_status_shm;
 
 #define SERVER "192.168.50.100"
 #define PORT 5011
@@ -87,6 +89,27 @@ read_sensors_status(RC_td_t *td)
 	td->power.mAHConsumed = (uint16_t)conv;
 }
 
+static void
+read_system_status(RC_td_t *td)
+{
+	union {
+		sys_telemetry_data_t *s;
+		void *p;
+	} p;
+
+	shm_map_read(&sys_status_shm, &p.p);
+
+	td->system.CPUload = p.s->cpuload;
+	/* 0 - AO temp
+	 * 1 - CPU temp
+	 * 2 - GPU temp
+	 * 3 - PLL temp
+	 * 4 - PMIC temp
+	 * 5 - FAN
+	 */
+	td->system.CPUtemp = p.s->temp[1];
+}
+
 int
 telemetry_init(void)
 {
@@ -99,16 +122,18 @@ telemetry_init(void)
 int
 telemetry_main(void)
 {
-	int result = 0;
+	int result = 1;
 
 	do {
 		if (!shm_map_open("shm_gps", &gps_shm)) {
-			result = 1;
 			break;
 		}
 
 		if (!shm_map_open("shm_sensors", &sensors_shm)) {
-			result = 1;
+			break;
+		}
+
+		if (!shm_map_open("sys_status", &sys_status_shm)) {
 			break;
 		}
 
@@ -117,7 +142,6 @@ telemetry_main(void)
 		int s, slen = sizeof(si_other);
 
 		if ((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-			result = 1;
 			log_err("cannot create socket");
 			break;
 		}
@@ -128,7 +152,6 @@ telemetry_main(void)
 
 		if (inet_aton(SERVER, &si_other.sin_addr) == 0) {
 			log_err("inet_aton() failed");
-			result = 1;
 			break;
 		}
 
@@ -136,9 +159,12 @@ telemetry_main(void)
 		memset((uint8_t *)&rc_td, 0, sizeof(rc_td));
 		rc_td.magic = RC_TELEMETRY_MAGIC;
 
+		result = 0;
+
 		while (svc_cycle()) {
 			read_gps_status(&rc_td);
 			read_sensors_status(&rc_td);
+			read_system_status(&rc_td);
 
 			rc_td.CRC = crc16((uint8_t *)&rc_td, offsetof(RC_td_t, CRC), 0U);
 
