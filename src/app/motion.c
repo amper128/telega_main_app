@@ -389,6 +389,7 @@ motion_main(void)
 
 					speed = 0;
 					steering = 0;
+					rc_connected = false;
 				}
 			}
 
