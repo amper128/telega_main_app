@@ -19,6 +19,10 @@
 
 #define RC_PORT (5565)
 
+static shm_t motion_telemetry_shm;
+
+static motion_telemetry_t mt;
+
 /**
  * @brief ограничение значения в указанных пределах
  * @param val [in] исходное значение
@@ -46,7 +50,7 @@ flimit(float val, float max, float min)
  * @param data [in] данные из сообщения
  * @retval сконвертированное значение
  */
-__attribute__((used)) static inline int16_t
+static inline int16_t
 vesc_read_i16(const uint16_t data)
 {
 	union {
@@ -83,7 +87,7 @@ vesc_read_i32(const uint32_t data)
  * @param div [in] делитель
  * @retval сконвертированное значение
  */
-static inline double
+__attribute_used__ static inline double
 vesc_read_float2(const uint16_t data, double div)
 {
 	union {
@@ -104,7 +108,7 @@ vesc_read_float2(const uint16_t data, double div)
  * @param div [in] делитель
  * @retval сконвертированное значение
  */
-static inline double
+__attribute_used__ static inline double
 vesc_read_float4(const uint32_t data, double div)
 {
 	union {
@@ -145,6 +149,12 @@ vesc_write_i32(const int32_t data, uint8_t *dest)
 static void
 parse_msg(const struct can_packet_t *msg)
 {
+	uint8_t drive_id = msg->hdr.id;
+	if (drive_id >= DRIVES_COUNT) {
+		log_warn("unknown drive ID %u", drive_id);
+		return;
+	}
+
 	switch (msg->hdr.cmd) {
 	case (uint8_t)VESC_CAN_PACKET_STATUS: {
 		union {
@@ -157,9 +167,14 @@ parse_msg(const struct can_packet_t *msg)
 		} u;
 
 		u.p8 = msg->data;
-		log_inf("rpm: %i, current: %.1f, duty: %.3f", vesc_read_i32(u.status->rpm),
+
+		mt.dt[drive_id].rpm = vesc_read_i32(u.status->rpm);
+		mt.dt[drive_id].current_X10 = vesc_read_i16(u.status->current_X10);
+		mt.dt[drive_id].duty_X1000 = vesc_read_i16(u.status->duty_X1000);
+
+		/*log_inf("rpm: %i, current: %.1f, duty: %.3f", mt.dt[drive_id].rpm,
 			vesc_read_float2(u.status->current_X10, 10.0),
-			vesc_read_float2(u.status->duty_X1000, 1000.0));
+			vesc_read_float2(u.status->duty_X1000, 1000.0));*/
 		break;
 	}
 
@@ -173,9 +188,13 @@ parse_msg(const struct can_packet_t *msg)
 		} u;
 
 		u.p8 = msg->data;
-		log_inf("consumed: %.4f ah, charged: %.4f ah",
+
+		mt.dt[drive_id].ah_X10000 = vesc_read_i32(u.status2->ah_X10000);
+		mt.dt[drive_id].ahch_X10000 = vesc_read_i32(u.status2->ahch_X10000);
+
+		/*log_inf("consumed: %.4f ah, charged: %.4f ah",
 			vesc_read_float4(u.status2->ah_X10000, 10000.0),
-			vesc_read_float4(u.status2->ahch_X10000, 10000.0));
+			vesc_read_float4(u.status2->ahch_X10000, 10000.0));*/
 		break;
 	}
 
@@ -189,9 +208,13 @@ parse_msg(const struct can_packet_t *msg)
 		} u;
 
 		u.p8 = msg->data;
-		log_inf("consumed: %.4f wh, charged: %.4f wh",
+
+		mt.dt[drive_id].wh_X10000 = vesc_read_i32(u.status3->wh_X10000);
+		mt.dt[drive_id].whch_X10000 = vesc_read_i32(u.status3->whch_X10000);
+
+		/*log_inf("consumed: %.4f wh, charged: %.4f wh",
 			vesc_read_float4(u.status3->wh_X10000, 10000.0),
-			vesc_read_float4(u.status3->whch_X10000, 10000.0));
+			vesc_read_float4(u.status3->whch_X10000, 10000.0));*/
 		break;
 	}
 
@@ -207,11 +230,17 @@ parse_msg(const struct can_packet_t *msg)
 		} u;
 
 		u.p8 = msg->data;
-		log_inf("temp_fet: %.1f, temp_motor: %.1f, current_in: %.1f, pid_pos: %.2f",
+
+		mt.dt[drive_id].temp_fet_X10 = vesc_read_i16(u.status4->temp_fet_X10);
+		mt.dt[drive_id].temp_motor_X10 = vesc_read_i16(u.status4->temp_motor_X10);
+		mt.dt[drive_id].current_in_X10 = vesc_read_i16(u.status4->current_in_X10);
+		mt.dt[drive_id].pid_pos_now_X50 = vesc_read_i16(u.status4->pid_pos_now_X50);
+
+		/*log_inf("temp_fet: %.1f, temp_motor: %.1f, current_in: %.1f, pid_pos: %.2f",
 			vesc_read_float2(u.status4->temp_fet_X10, 10.0),
 			vesc_read_float2(u.status4->temp_motor_X10, 10.0),
 			vesc_read_float2(u.status4->current_in_X10, 10.0),
-			vesc_read_float2(u.status4->pid_pos_now_X50, 50.0));
+			vesc_read_float2(u.status4->pid_pos_now_X50, 50.0));*/
 		break;
 	}
 
@@ -226,8 +255,12 @@ parse_msg(const struct can_packet_t *msg)
 		} u;
 
 		u.p8 = msg->data;
-		log_inf("tacho: %i, v_in: %.1f", vesc_read_i32(u.status5->tacho_value),
-			vesc_read_float2(u.status5->v_in_X10, 10.0));
+
+		mt.dt[drive_id].tacho_value = vesc_read_i32(u.status5->tacho_value);
+		mt.dt[drive_id].v_in_X10 = vesc_read_i16(u.status5->v_in_X10);
+
+		/*log_inf("tacho: %i, v_in: %.1f", mt.dt[drive_id].tacho_value,
+			vesc_read_float2(u.status5->v_in_X10, 10.0));*/
 		break;
 	}
 
@@ -268,11 +301,15 @@ do_motion(float speed, float steering)
 	(void)steering;
 
 	set_drv_duty(0U, speed);
+
+	shm_map_write(&motion_telemetry_shm, &mt, sizeof(mt));
 }
 
 int
 motion_init(void)
 {
+	shm_map_init("motion_status", sizeof(motion_telemetry_shm));
+
 	return 0;
 }
 
@@ -286,6 +323,8 @@ motion_main(void)
 			result = -1;
 			break;
 		}
+
+		shm_map_open("motion_status", &motion_telemetry_shm);
 
 		struct sockaddr_in rc_sockaddr;
 		int rc_sock;
@@ -311,10 +350,15 @@ motion_main(void)
 		float speed = 0.0f;
 		float steering = 0.0f;
 
+		uint64_t last_rc_rx = svc_get_monotime();
+		bool rc_connected = false;
+
 		while (svc_cycle()) {
+			uint64_t mono = svc_get_monotime();
 			uint8_t rc_data[512];
 			ssize_t data_len = recvfrom(rc_sock, rc_data, 512U, 0,
 						    (struct sockaddr *)&rc_sockaddr, &slen_rc);
+
 			if (data_len > 0) {
 				struct _r {
 					uint32_t seqno;
@@ -333,6 +377,19 @@ motion_main(void)
 
 				speed = (float)r.r->axis[1] / 500.0f;
 				steering = (float)r.r->axis[0] / 500.0f;
+
+				last_rc_rx = mono;
+				rc_connected = true;
+			}
+
+			if (rc_connected) {
+				/* проверка что связь с центром не потеряна */
+				if ((mono - last_rc_rx) > (500ULL * TIME_MS)) {
+					log_warn("RC connection lost! Stop drone!");
+
+					speed = 0;
+					steering = 0;
+				}
 			}
 
 			do_motion(speed, steering);
