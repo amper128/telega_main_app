@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <byteswap.h>
 #include <fcntl.h>
+#include <math.h>
 
 #include <io/canbus.h>
 #include <log/log.h>
@@ -297,12 +298,24 @@ do_motion(float speed, float steering)
 		parse_msg(&msg);
 	}
 
-	(void)speed;
-	(void)steering;
-
-	set_drv_duty(0U, speed);
-
 	shm_map_write(&motion_telemetry_shm, &mt, sizeof(mt));
+
+	speed = flimit(speed, 1.0f, -1.0f);
+	steering = flimit(steering, 1.0f, -1.0f);
+
+	float lsp;
+	float rsp;
+
+	if (steering > 0) {
+		rsp = speed * (1.0f - steering);
+		lsp = speed;
+	} else {
+		lsp = speed * (1.0f - fabsf(steering));
+		rsp = speed;
+	}
+
+	set_drv_duty(0U, rsp);
+	set_drv_duty(1U, lsp);
 }
 
 int
