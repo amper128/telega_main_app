@@ -304,17 +304,56 @@ do_motion(float speed, float steering)
 
 	speed = flimit(speed, 1.0f, -1.0f);
 	steering = flimit(steering, 1.0f, -1.0f);
+	static const float plimit = 0.25f;
 
+	float left;
+	float right;
 	float lsp;
 	float rsp;
 
-	if (steering > 0) {
-		rsp = speed * (1.0f - steering);
-		lsp = speed;
+	float pspeed;
+	float pscale;
+
+	if (speed > 0.0f) {
+		/* forward */
+		if (steering > 0.0f) {
+			left = 1.0f;
+			right = 1.0f - steering;
+		} else {
+			/* 1 - (-steering) */
+			left = 1.0f + steering;
+			right = 1.0f;
+		}
 	} else {
-		lsp = speed * (1.0f - fabsf(steering));
-		rsp = speed;
+		/* reverse */
+		if (steering > 0.0f) {
+			left = 1.0f - steering;
+			right = 1.0f;
+		} else {
+			left = 1.0f;
+			/* 1 - (-steering) */
+			right = 1.0f + steering;
+		}
 	}
+
+	/* scale to throttle */
+	left *= speed;
+	right *= speed;
+
+	/* calculate pivot amount
+	 * - strength of pivot (pspeed) based on steering input
+	 * - blending of pivot vs drive (pscale) based on throttle input
+	 */
+	pspeed = steering;
+	if (fabsf(speed) > plimit) {
+		pscale = 0.0f;
+	} else {
+		pscale = 1.0f - (fabsf(speed) / plimit);
+	}
+
+	/* Calculate final mix of Drive and Pivot */
+	lsp = (1.0f - pscale) * left + pscale * (pspeed);
+	rsp = (1.0f - pscale) * right - pscale * (pspeed);
 
 	set_drv_duty(0U, rsp);
 	set_drv_duty(1U, lsp);
