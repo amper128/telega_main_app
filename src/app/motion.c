@@ -257,11 +257,13 @@ parse_msg(const struct can_packet_t *msg)
 
 		u.p8 = msg->data;
 
+		uint16_t V =
+		    u.status5->v_in_X10 & 0xFF7FU; /* накладываем маску, а то лишний бит бывает */
 		mt.dt[drive_id].tacho_value = vesc_read_i32(u.status5->tacho_value);
-		mt.dt[drive_id].v_in_X10 = vesc_read_i16(u.status5->v_in_X10);
+		mt.dt[drive_id].v_in_X10 = vesc_read_i16(V);
 
 		/*log_inf("tacho: %i, v_in: %.1f", mt.dt[drive_id].tacho_value,
-			vesc_read_float2(u.status5->v_in_X10, 10.0));*/
+			vesc_read_float2(V, 10.0));*/
 		break;
 	}
 
