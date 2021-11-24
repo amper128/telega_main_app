@@ -19,10 +19,12 @@
 #include <private/sensors.h>
 #include <private/system_telemetry.h>
 #include <private/telemetry.h>
+#include <private/motion.h>
 
 static shm_t gps_shm;
 static shm_t sensors_shm;
 static shm_t sys_status_shm;
+static shm_t motion_status_shm;
 
 #define SERVER "192.168.50.100"
 #define PORT 5011
@@ -90,6 +92,37 @@ read_sensors_status(RC_td_t *td)
 }
 
 static void
+read_power_status(RC_td_t *td)
+{
+	union {
+		motion_telemetry_t *s;
+		void *p;
+	} p;
+
+	shm_map_read(&motion_status_shm, &p.p);
+
+	double conv = 0.0;
+	size_t i;
+	size_t cnt = 0;
+	for (i = 0U; i < DRIVES_COUNT; i++) {
+		conv += (double)p.s->dt[i].v_in_X10;
+		if (p.s->dt[i].v_in_X10 != 0) {
+			cnt++;
+		}
+	}
+	conv /= (double)cnt;
+	conv /= 10.0;
+	td->power.PackVoltageX100 = (uint16_t)(conv * 100.0);
+
+
+	conv = 0.0;
+	for (i = 0U; i < DRIVES_COUNT; i++) {
+		conv += (double)p.s->dt[i].current_in_X10;
+	}
+	td->power.PackCurrentX10 = (uint16_t)conv;
+}
+
+static void
 read_system_status(RC_td_t *td)
 {
 	union {
@@ -137,6 +170,10 @@ telemetry_main(void)
 			break;
 		}
 
+		if (!shm_map_open("motion_status", &motion_status_shm)) {
+			break;
+		}
+
 		/* UDP init */
 		struct sockaddr_in si_other;
 		int s, slen = sizeof(si_other);
@@ -165,6 +202,7 @@ telemetry_main(void)
 			read_gps_status(&rc_td);
 			read_sensors_status(&rc_td);
 			read_system_status(&rc_td);
+			read_power_status(&rc_td);
 
 			rc_td.CRC = crc16((uint8_t *)&rc_td, offsetof(RC_td_t, CRC), 0U);
 
