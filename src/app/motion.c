@@ -316,6 +316,8 @@ do_motion(float speed, float steering)
 
 	set_drv_duty(0U, rsp);
 	set_drv_duty(1U, lsp);
+	set_drv_duty(4U, rsp);
+	set_drv_duty(5U, lsp);
 }
 
 int
@@ -369,31 +371,37 @@ motion_main(void)
 		while (svc_cycle()) {
 			uint64_t mono = svc_get_monotime();
 			uint8_t rc_data[512];
-			ssize_t data_len = recvfrom(rc_sock, rc_data, 512U, 0,
-						    (struct sockaddr *)&rc_sockaddr, &slen_rc);
 
-			if (data_len > 0) {
-				struct _r {
-					uint32_t seqno;
-					int16_t res;
-					int16_t axis[4];
-					int16_t data[4];
-					int8_t sq;
-				};
+			do {
+				ssize_t data_len =
+				    recvfrom(rc_sock, rc_data, 512U, 0,
+					     (struct sockaddr *)&rc_sockaddr, &slen_rc);
 
-				union {
-					struct _r *r;
-					uint8_t *u8;
-				} r;
+				if (data_len > 0) {
+					struct _r {
+						/*uint32_t seqno;
+						int16_t res;*/
+						int16_t axis[4];
+						int16_t data[4];
+						int8_t sq;
+					};
 
-				r.u8 = rc_data;
+					union {
+						struct _r *r;
+						uint8_t *u8;
+					} r;
 
-				speed = (float)r.r->axis[1] / 500.0f;
-				steering = (float)r.r->axis[0] / 500.0f;
+					r.u8 = rc_data;
 
-				last_rc_rx = mono;
-				rc_connected = true;
-			}
+					speed = (float)(r.r->axis[1] - 1500) / 500.0f;
+					steering = (float)(r.r->axis[0] - 1500) / 500.0f;
+
+					last_rc_rx = mono;
+					rc_connected = true;
+				} else {
+					break;
+				}
+			} while (true);
 
 			if (rc_connected) {
 				/* проверка что связь с центром не потеряна */
