@@ -27,6 +27,7 @@
 #define RC_KEEPALIVE_CMD (0x4b505f414c495645ULL)
 
 #define CONNECT_TMO (1000000000ULL)
+#define DISCONNECT_TMO (2000000000ULL)
 
 typedef struct {
 	uint64_t magic;
@@ -39,6 +40,7 @@ typedef struct {
 static struct sockaddr_in si_other;
 static bool connected = false;
 static uint64_t connect_tm = 0ULL;
+static uint64_t last_keepalive = 0ULL;
 
 static void
 power_cmd_read(int sock)
@@ -49,10 +51,9 @@ power_cmd_read(int sock)
 	pwr_sockaddr.sin_family = AF_INET;
 	pwr_sockaddr.sin_port = htons(PORT);
 	pwr_sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	uint64_t mono = svc_get_monotime();
 
 	if (!connected) {
-		uint64_t mono = svc_get_monotime();
-
 		if ((mono - connect_tm) >= CONNECT_TMO) {
 			/* send "connect" command */
 
@@ -70,6 +71,11 @@ power_cmd_read(int sock)
 				   slen) == -1) {
 				log_err("cannot send to socket");
 			}
+		}
+	} else {
+		if ((mono - last_keepalive) >= DISCONNECT_TMO) {
+			log_warn("disconnected");
+			connected = false;
 		}
 	}
 
@@ -106,6 +112,7 @@ power_cmd_read(int sock)
 
 				case RC_KEEPALIVE_CMD:
 					/* reply keepalive */
+					last_keepalive = mono;
 					connected = true;
 					if (sendto(sock, r.u8, sizeof(pwr_ctl_t), 0,
 						   (struct sockaddr *)&si_other, slen) == -1) {
