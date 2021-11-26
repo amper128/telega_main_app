@@ -17,7 +17,7 @@
 #include <private/power.h>
 
 #define SERVER "192.168.50.100"
-#define PORT 5011
+#define PORT 5100
 
 #define RC_POWER_MAGIC (0x52435f504f574552ULL)
 
@@ -106,6 +106,7 @@ power_cmd_read(int sock)
 
 				case RC_KEEPALIVE_CMD:
 					/* reply keepalive */
+					connected = true;
 					if (sendto(sock, r.u8, sizeof(pwr_ctl_t), 0,
 						   (struct sockaddr *)&si_other, slen) == -1) {
 						log_err("cannot send to socket");
@@ -148,6 +149,17 @@ power_main(void)
 
 		if (inet_aton(SERVER, &si_other.sin_addr) == 0) {
 			log_err("inet_aton() failed");
+			break;
+		}
+
+		struct sockaddr_in pwr_sockaddr;
+		pwr_sockaddr.sin_family = AF_INET;
+		pwr_sockaddr.sin_port = htons(PORT);
+		pwr_sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+		memset(pwr_sockaddr.sin_zero, '\0', sizeof(pwr_sockaddr.sin_zero));
+
+		if (bind(s, (struct sockaddr *)&pwr_sockaddr, sizeof(struct sockaddr)) == -1) {
+			log_err("bind()");
 			break;
 		}
 
