@@ -9,6 +9,7 @@ pkg_check_modules(GST_APP REQUIRED gstreamer-app-1.0)
 pkg_check_modules(GST_VIDEO REQUIRED gstreamer-video-1.0)
 
 pkg_check_modules(DBUS REQUIRED dbus-1)
+pkg_check_modules(DBUS REQUIRED dbus-glib-1)
 
 file(GLOB_RECURSE app_headers "include/*.h")
 
