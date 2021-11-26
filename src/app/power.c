@@ -151,6 +151,9 @@ power_main(void)
 			break;
 		}
 
+		int flags = fcntl(s, F_GETFL, 0);
+		fcntl(s, F_SETFL, flags | O_NONBLOCK);
+
 		while (svc_cycle()) {
 			power_cmd_read(s);
 		}
