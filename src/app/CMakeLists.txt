@@ -11,6 +11,8 @@ pkg_check_modules(GST_VIDEO REQUIRED gstreamer-video-1.0)
 pkg_check_modules(DBUS REQUIRED dbus-1)
 pkg_check_modules(DBUS REQUIRED dbus-glib-1)
 
+pkg_check_modules(GIO REQUIRED gio-2.0)
+
 file(GLOB_RECURSE app_headers "include/*.h")
 
 add_executable(${PROJECT_NAME}
@@ -42,4 +44,5 @@ target_link_libraries(${PROJECT_NAME}
 		${GST_APP_LIBRARIES}
 		${GST_VIDEO_LIBRARIES}
 		${DBUS_LIBRARIES}
+		${GIO_LIBRARIES}
 	)
