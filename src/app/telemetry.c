@@ -16,14 +16,16 @@
 #include <svc/svc.h>
 
 #include <private/gps.h>
+#include <private/motion.h>
+#include <private/network_status.h>
 #include <private/sensors.h>
 #include <private/system_telemetry.h>
 #include <private/telemetry.h>
-#include <private/motion.h>
 
 static shm_t gps_shm;
 static shm_t sensors_shm;
 static shm_t sys_status_shm;
+static shm_t modem_status_shm;
 static shm_t motion_status_shm;
 
 #define SERVER "192.168.50.100"
@@ -114,7 +116,6 @@ read_power_status(RC_td_t *td)
 	conv /= 10.0;
 	td->power.PackVoltageX100 = (uint16_t)(conv * 100.0);
 
-
 	conv = 0.0;
 	for (i = 0U; i < DRIVES_COUNT; i++) {
 		conv += (double)p.s->dt[i].current_in_X10;
@@ -143,6 +144,22 @@ read_system_status(RC_td_t *td)
 	td->system.CPUtemp = p.s->temp[1];
 }
 
+static void
+read_modem_status(RC_td_t *td)
+{
+	union {
+		modem_status_t *s;
+		void *p;
+	} p;
+
+	shm_map_read(&modem_status_shm, &p.p);
+
+	td->link.Status = p.s->Status;
+	td->link.Mode = p.s->Mode;
+	td->link.Signal = p.s->Signal;
+	strncpy(td->link.OpName, p.s->OpName, OPNAMELEN);
+}
+
 int
 telemetry_init(void)
 {
@@ -167,6 +184,10 @@ telemetry_main(void)
 		}
 
 		if (!shm_map_open("sys_status", &sys_status_shm)) {
+			break;
+		}
+
+		if (!shm_map_open("modem_status", &modem_status_shm)) {
 			break;
 		}
 
@@ -202,6 +223,7 @@ telemetry_main(void)
 			read_gps_status(&rc_td);
 			read_sensors_status(&rc_td);
 			read_system_status(&rc_td);
+			read_modem_status(&rc_td);
 			read_power_status(&rc_td);
 
 			rc_td.CRC = crc16((uint8_t *)&rc_td, offsetof(RC_td_t, CRC), 0U);
