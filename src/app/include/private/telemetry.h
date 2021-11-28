@@ -14,6 +14,8 @@
 
 #define OPNAMELEN (32U)
 
+#define DRIVES_COUNT (6U)
+
 typedef struct {
 	uint64_t magic;	    //  0xB01EDEAD
 	uint64_t Timestamp; // -not used- timestamp in milliseconds
@@ -60,6 +62,15 @@ typedef struct {
 		    CompassDegrees; // -u16 compassdegrees used- either magnetic compass reading (if
 				    // compass enabled) or filtered GPS course over ground if not
 	} orientation;
+
+	struct {
+		int32_t rpm;
+		int16_t current_X10;
+		int16_t duty_X1000;
+		int16_t temp_fet_X10;
+		int16_t temp_motor_X10;
+		int16_t __reserved[2U];
+	} drives[DRIVES_COUNT];
 
 	uint16_t CRC;
 } RC_td_t;

@@ -94,7 +94,7 @@ read_sensors_status(RC_td_t *td)
 }
 
 static void
-read_power_status(RC_td_t *td)
+read_drives_status(RC_td_t *td)
 {
 	union {
 		motion_telemetry_t *s;
@@ -121,6 +121,14 @@ read_power_status(RC_td_t *td)
 		conv += (double)p.s->dt[i].current_in_X10;
 	}
 	td->power.PackCurrentX10 = (uint16_t)conv;
+
+	for (i = 0U; i < DRIVES_COUNT; i++) {
+		td->drives[i].rpm = p.s->dt[i].rpm;
+		td->drives[i].current_X10 = p.s->dt[i].current_X10;
+		td->drives[i].duty_X1000 = p.s->dt[i].duty_X1000;
+		td->drives[i].temp_fet_X10 = p.s->dt[i].temp_fet_X10;
+		td->drives[i].temp_motor_X10 = p.s->dt[i].temp_motor_X10;
+	}
 }
 
 static void
@@ -224,7 +232,7 @@ telemetry_main(void)
 			read_sensors_status(&rc_td);
 			read_system_status(&rc_td);
 			read_modem_status(&rc_td);
-			read_power_status(&rc_td);
+			read_drives_status(&rc_td);
 
 			rc_td.CRC = crc16((uint8_t *)&rc_td, offsetof(RC_td_t, CRC), 0U);
 
