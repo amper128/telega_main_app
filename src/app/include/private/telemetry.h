@@ -17,7 +17,7 @@
 #define DRIVES_COUNT (6U)
 
 typedef struct {
-	uint64_t magic;	    //  0xB01EDEAD
+	uint64_t magic;
 	uint64_t Timestamp; // -not used- timestamp in milliseconds
 
 	struct {
@@ -66,7 +66,7 @@ typedef struct {
 	struct {
 		int32_t rpm;
 		int16_t current_X10;
-		int16_t duty_X1000;
+		int16_t duty_X100;
 		int16_t temp_fet_X10;
 		int16_t temp_motor_X10;
 		int16_t __reserved[2U];

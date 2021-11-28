@@ -125,7 +125,7 @@ read_drives_status(RC_td_t *td)
 	for (i = 0U; i < DRIVES_COUNT; i++) {
 		td->drives[i].rpm = p.s->dt[i].rpm;
 		td->drives[i].current_X10 = p.s->dt[i].current_X10;
-		td->drives[i].duty_X1000 = p.s->dt[i].duty_X1000;
+		td->drives[i].duty_X100 = p.s->dt[i].duty_X100;
 		td->drives[i].temp_fet_X10 = p.s->dt[i].temp_fet_X10;
 		td->drives[i].temp_motor_X10 = p.s->dt[i].temp_motor_X10;
 	}

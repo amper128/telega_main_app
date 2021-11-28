@@ -18,7 +18,7 @@ typedef struct {
 	uint32_t flags;
 	int32_t rpm;
 	int16_t current_X10;
-	int16_t duty_X1000;
+	int16_t duty_X100;
 	int32_t ah_X10000;
 	int32_t ahch_X10000;
 	int32_t wh_X10000;
