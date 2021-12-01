@@ -105,6 +105,7 @@ video_main(void)
 	gst_caps_unref(ratecaps);
 
 	/* Modify the source's properties */
+	g_object_set(source, "ispdigitalgainrange", "1 2", NULL);
 	g_object_set(conv, "flip-method", 2, NULL);
 	g_object_set(encoder, "bitrate", BITRATE,
 		     /*"iframeinterval", 60, "preset-level", 0,*/ "control-rate", 1,
