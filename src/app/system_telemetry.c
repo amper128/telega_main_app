@@ -47,9 +47,10 @@ get_cpuload(void)
 	fclose(fp);
 
 	if (r > 0) {
-		cpu_load = (uint8_t)(((b[0] + b[1] + b[2]) - (a[0] + a[1] + a[2])) /
-				     ((b[0] + b[1] + b[2] + b[3]) - (a[0] + a[1] + a[2] + a[3]))) *
-			   100U;
+		long double load = (((b[0] + b[1] + b[2]) - (a[0] + a[1] + a[2])) /
+				    ((b[0] + b[1] + b[2] + b[3]) - (a[0] + a[1] + a[2] + a[3]))) *
+				   100.0L;
+		cpu_load = (uint8_t)load;
 	}
 
 	a[0] = b[0];
