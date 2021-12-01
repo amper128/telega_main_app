@@ -5,9 +5,9 @@
  *	nvvidconv flip-method=2 ! \
  *	queue ! \
  *	videorate ! video/x-raw,framerate=30/1 ! \
- *	omxh265enc bitrate=600000 iframeinterval=60 preset-level=1 control-rate=2 ! \
- *	h265parse ! \
- *	rtph265pay config-interval=1 mtu=1420 pt=96 ! \
+ *	omxh264enc bitrate=600000 iframeinterval=60 preset-level=1 control-rate=2 ! \
+ *	h264parse ! \
+ *	rtph264pay config-interval=1 mtu=1420 pt=96 ! \
  *	rtpulpfecenc percentage=100 pt=122 ! \
  *	udpsink host=192.168.50.100 port=5600 sync=false async=false
  *
@@ -20,8 +20,8 @@
 #define VIDEO_W (1920)
 #define VIDEO_H (1080)
 #define VIDEO_FPS (30)
-#define BITRATE (8000000)
-#define FEC_PERCENT (25)
+#define BITRATE (4000000)
+#define FEC_PERCENT (5)
 
 int
 video_init(void)
@@ -53,10 +53,10 @@ video_main(void)
 	conv = gst_element_factory_make("nvvidconv", "vidconv");
 	encoder_q = gst_element_factory_make("queue", "encoderq");
 	rate = gst_element_factory_make("videorate", "videorate");
-	// encoder		= gst_element_factory_make ("omxh265enc" , "h265encoder");
-	encoder = gst_element_factory_make("nvv4l2h265enc", "h265encoder");
-	parser = gst_element_factory_make("h265parse", "parser-h265");
-	rtp = gst_element_factory_make("rtph265pay", "rtp");
+	// encoder		= gst_element_factory_make ("omxh264enc" , "h264encoder");
+	encoder = gst_element_factory_make("nvv4l2h264enc", "h264encoder");
+	parser = gst_element_factory_make("h264parse", "parser-h264");
+	rtp = gst_element_factory_make("rtph264pay", "rtp");
 	rtpfec = gst_element_factory_make("rtpulpfecenc", "rtpfec");
 	udpsink = gst_element_factory_make("udpsink", "destination");
 
