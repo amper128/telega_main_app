@@ -10,6 +10,7 @@
 #include <byteswap.h>
 #include <fcntl.h>
 #include <math.h>
+#include <termios.h>
 
 #include <io/canbus.h>
 #include <log/log.h>
@@ -23,6 +24,8 @@
 static shm_t motion_telemetry_shm;
 
 static motion_telemetry_t mt;
+
+static int servo_fd;
 
 /**
  * @brief ограничение значения в указанных пределах
@@ -361,6 +364,42 @@ do_motion(float speed, float steering)
 	set_drv_duty(5U, lsp);
 }
 
+static int
+serial_open(const char *name, const speed_t baud)
+{
+	int fd = -1;
+
+	do {
+		fd = open(name, O_RDWR);
+	} while ((fd < 0) && (errno == EINTR));
+
+	if (fd < 0) {
+		log_err("could not open serial device %s: %s", name, strerror(errno));
+		return fd;
+	}
+
+	// disable echo on serial lines
+	if (isatty(fd)) {
+		struct termios ios;
+
+		tcgetattr(fd, &ios);
+		ios.c_lflag = 0;		   /* disable ECHO, ICANON, etc... */
+		ios.c_oflag &= (tcflag_t)(~ONLCR); /* Stop \n -> \r\n translation on output */
+		ios.c_iflag &= (tcflag_t)(~(
+		    ICRNL | INLCR));		/* Stop \r -> \n & \n -> \r translation on input */
+		ios.c_iflag |= (IGNCR | IXOFF); /* Ignore \r & XON/XOFF on input */
+
+		if (baud != B0) {
+			cfsetispeed(&ios, baud);
+			cfsetospeed(&ios, baud);
+		}
+
+		tcsetattr(fd, TCSANOW, &ios);
+	}
+
+	return fd;
+}
+
 int
 motion_init(void)
 {
@@ -378,6 +417,11 @@ motion_main(void)
 		if (can_init() < 0) {
 			result = -1;
 			break;
+		}
+
+		servo_fd = serial_open("/dev/ttyUSB0", B115200);
+		if (servo_fd < 0) {
+			return 1;
 		}
 
 		shm_map_open("motion_status", &motion_telemetry_shm);
@@ -434,8 +478,26 @@ motion_main(void)
 
 					r.u8 = rc_data;
 
-					speed = (float)(r.r->axis[1] - 1500) / 500.0f;
-					steering = (float)(r.r->axis[0] - 1500) / 500.0f;
+					if (r.r->data[0] & 0x10) {
+						float servo_pan;
+						float servo_tilt;
+						servo_pan = (float)(r.r->axis[0] - 1500) / 500.0f;
+						servo_pan *= 90.0f;
+						servo_pan += 90.0f - 5.0f;
+
+						servo_tilt = (float)(r.r->axis[1] - 1500) / 500.0f;
+						servo_tilt *= 90.0f;
+						servo_tilt += 90.0f - 8.0f;
+
+						uint8_t data[4] = {0xA5, (uint8_t)servo_pan,
+								   (uint8_t)servo_tilt, 0U};
+						data[3] = (uint8_t)(data[0] + data[1] + data[2]);
+						int w = write(servo_fd, data, sizeof(data));
+						(void)w;
+					} else {
+						speed = (float)(r.r->axis[1] - 1500) / 500.0f;
+						steering = (float)(r.r->axis[0] - 1500) / 500.0f;
+					}
 
 					last_rc_rx = mono;
 					rc_connected = true;
