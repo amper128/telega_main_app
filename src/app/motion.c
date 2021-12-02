@@ -21,6 +21,8 @@
 
 #define RC_PORT (5565)
 
+#define DEADZONE (0.05f)
+
 static shm_t motion_telemetry_shm;
 
 static motion_telemetry_t mt;
@@ -304,6 +306,26 @@ do_motion(float speed, float steering)
 	}
 
 	shm_map_write(&motion_telemetry_shm, &mt, sizeof(mt));
+
+	if (fabsf(speed) < DEADZONE) {
+		speed = 0.0f;
+	} else {
+		if (speed > 0.0f) {
+			speed -= DEADZONE;
+		} else {
+			speed += DEADZONE;
+		}
+	}
+
+	if (fabsf(steering) < DEADZONE) {
+		steering = 0.0f;
+	} else {
+		if (steering > 0.0f) {
+			steering -= DEADZONE;
+		} else {
+			steering += DEADZONE;
+		}
+	}
 
 	speed = flimit(speed, 1.0f, -1.0f);
 	steering = flimit(steering, 1.0f, -1.0f);
