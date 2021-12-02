@@ -100,15 +100,23 @@ power_cmd_read(int sock)
 				}
 
 				switch (r.pc->cmd) {
-				case RC_REBOOT_CMD:
+				case RC_REBOOT_CMD: {
+					int result;
 					/* do reboot */
 					log_err("REBOOT");
+					result = system("reboot");
+					(void)result;
 					break;
+				}
 
-				case RC_SHUTDOWN_CMD:
+				case RC_SHUTDOWN_CMD: {
+					int result;
 					/* do shutdown */
 					log_err("SHUTDOWN");
+					result = system("halt -p");
+					(void)result;
 					break;
+				}
 
 				case RC_KEEPALIVE_CMD:
 					/* reply keepalive */
