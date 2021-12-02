@@ -505,7 +505,7 @@ motion_main(void)
 						float servo_tilt;
 						servo_pan = (float)(r.r->axis[0] - 1500) / 500.0f;
 						servo_pan *= 90.0f;
-						servo_pan += 90.0f - 5.0f;
+						servo_pan += 90.0f + 5.0f;
 
 						servo_tilt = (float)(r.r->axis[1] - 1500) / 500.0f;
 						servo_tilt *= 90.0f;
