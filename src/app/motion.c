@@ -29,6 +29,8 @@ static motion_telemetry_t mt;
 
 static int servo_fd;
 
+static bool m_light_gpio = false;
+
 /**
  * @brief ограничение значения в указанных пределах
  * @param val [in] исходное значение
@@ -446,6 +448,13 @@ motion_main(void)
 			return 1;
 		}
 
+		/* FIXME: GPIO setup */
+		result = system("echo 78 > /sys/class/gpio/unexport");
+		result = system("echo 78 > /sys/class/gpio/export");
+		result = system("echo out > /sys/class/gpio/gpio78/direction");
+		result = system("echo 1 > /sys/class/gpio/gpio78/active_low");
+		result = system("echo 0 > /sys/class/gpio/gpio78/value");
+
 		shm_map_open("motion_status", &motion_telemetry_shm);
 
 		struct sockaddr_in rc_sockaddr;
@@ -519,6 +528,22 @@ motion_main(void)
 					} else {
 						speed = (float)(r.r->axis[1] - 1500) / 500.0f;
 						steering = (float)(r.r->axis[0] - 1500) / 500.0f;
+					}
+
+					if (r.r->data[0] & 0x80) {
+						if (!m_light_gpio) {
+							result =
+							    system("echo 1 > "
+								   "/sys/class/gpio/gpio78/value");
+						}
+						m_light_gpio = true;
+					} else {
+						if (m_light_gpio) {
+							result =
+							    system("echo 0 > "
+								   "/sys/class/gpio/gpio78/value");
+						}
+						m_light_gpio = false;
 					}
 
 					last_rc_rx = mono;
