@@ -29,8 +29,6 @@ static motion_telemetry_t mt;
 
 static int servo_fd;
 
-static bool m_light_gpio = false;
-
 /**
  * @brief ограничение значения в указанных пределах
  * @param val [in] исходное значение
@@ -178,7 +176,7 @@ parse_msg(const struct can_packet_t *msg)
 
 		mt.dt[drive_id].rpm = vesc_read_i32(u.status->rpm);
 		mt.dt[drive_id].current_X10 = vesc_read_i16(u.status->current_X10);
-		mt.dt[drive_id].duty_X100 = vesc_read_i16(u.status->duty_X100);
+		mt.dt[drive_id].duty_X100 = vesc_read_i16(u.status->duty_X100) & 0x7FFF;
 
 		/*log_inf("rpm: %i, current: %.1f, duty: %.3f", mt.dt[drive_id].rpm,
 			vesc_read_float2(u.status->current_X10, 10.0),
@@ -382,10 +380,12 @@ do_motion(float speed, float steering)
 	lsp = (1.0f - pscale) * left + pscale * (pspeed);
 	rsp = (1.0f - pscale) * right - pscale * (pspeed);
 
-	set_drv_duty(0U, rsp);
-	set_drv_duty(1U, lsp);
-	set_drv_duty(4U, rsp);
-	set_drv_duty(5U, lsp);
+	set_drv_duty(0U, lsp);
+	set_drv_duty(1U, rsp);
+	set_drv_duty(2U, lsp);
+	set_drv_duty(3U, rsp);
+	set_drv_duty(4U, lsp);
+	set_drv_duty(5U, rsp);
 }
 
 static int
@@ -448,13 +448,6 @@ motion_main(void)
 			return 1;
 		}
 
-		/* FIXME: GPIO setup */
-		result = system("echo 78 > /sys/class/gpio/unexport");
-		result = system("echo 78 > /sys/class/gpio/export");
-		result = system("echo out > /sys/class/gpio/gpio78/direction");
-		result = system("echo 1 > /sys/class/gpio/gpio78/active_low");
-		result = system("echo 0 > /sys/class/gpio/gpio78/value");
-
 		shm_map_open("motion_status", &motion_telemetry_shm);
 
 		struct sockaddr_in rc_sockaddr;
@@ -497,7 +490,7 @@ motion_main(void)
 					struct _r {
 						/*uint32_t seqno;
 						int16_t res;*/
-						int16_t axis[4];
+						int16_t axis[6];
 						int16_t data[4];
 						int8_t sq;
 					};
@@ -509,42 +502,53 @@ motion_main(void)
 
 					r.u8 = rc_data;
 
-					if (r.r->data[0] & 0x10) {
-						float servo_pan;
-						float servo_tilt;
-						servo_pan = (float)(r.r->axis[0] - 1500) / 500.0f;
-						servo_pan *= 90.0f;
-						servo_pan += 90.0f + 5.0f;
+					static float servo_pan = 90.0f;
+					static float servo_tilt = 90.0f;
+					float pan = (float)(r.r->axis[2] - 1500) / 500.0f * 4.0f;
+					if (fabs(pan) > 0.1f) {
+						servo_pan += pan;
+					}
+					/*servo_pan *= 90.0f;
+					servo_pan += 90.0f + 5.0f;*/
 
-						servo_tilt = (float)(r.r->axis[1] - 1500) / 500.0f;
-						servo_tilt *= 90.0f;
-						servo_tilt += 90.0f - 8.0f;
-
-						uint8_t data[4] = {0xA5, (uint8_t)servo_pan,
-								   (uint8_t)servo_tilt, 0U};
-						data[3] = (uint8_t)(data[0] + data[1] + data[2]);
-						int w = write(servo_fd, data, sizeof(data));
-						(void)w;
-					} else {
-						speed = (float)(r.r->axis[1] - 1500) / 500.0f;
-						steering = (float)(r.r->axis[0] - 1500) / 500.0f;
+					if (servo_pan > 180.0f) {
+						servo_pan = 180.0f;
+					}
+					if (servo_pan < 0.0f) {
+						servo_pan = 0.0f;
 					}
 
-					if (r.r->data[0] & 0x80) {
-						if (!m_light_gpio) {
-							result =
-							    system("echo 1 > "
-								   "/sys/class/gpio/gpio78/value");
-						}
-						m_light_gpio = true;
-					} else {
-						if (m_light_gpio) {
-							result =
-							    system("echo 0 > "
-								   "/sys/class/gpio/gpio78/value");
-						}
-						m_light_gpio = false;
+					float tilt = (float)(r.r->axis[3] - 1500) / 500.0f * 4.0f;
+					if (fabs(tilt) > 0.1f) {
+						servo_tilt += tilt;
 					}
+					/*servo_tilt *= 90.0f;
+					servo_tilt += 90.0f + 8.0f;*/
+					if (servo_tilt > 160.0f) {
+						servo_tilt = 160.0f;
+					}
+					if (servo_tilt < 60.0f) {
+						servo_tilt = 60.0f;
+					}
+
+					if (r.r->data[0] & 0x1000U) {
+						servo_pan = 90.0f;
+						servo_tilt = 90.0f;
+					}
+
+					float light_value = (float)(r.r->axis[4] - 1500) / 500.0f * 255.0f;
+					if (light_value < 0.0f) {
+						light_value = 0.0f;
+					}
+
+					uint8_t data[5] = {0xA5, (uint8_t)servo_pan,
+								   (uint8_t)servo_tilt, (uint8_t)light_value, 0U};
+					data[4] = (uint8_t)(data[0] + data[1] + data[2] + data[3]);
+					int w = write(servo_fd, data, sizeof(data));
+					(void)w;
+
+					speed = (float)(r.r->axis[1] - 1500) / 500.0f;
+					steering = (float)(r.r->axis[0] - 1500) / 500.0f;
 
 					last_rc_rx = mono;
 					rc_connected = true;
@@ -570,3 +574,4 @@ motion_main(void)
 
 	return result;
 }
+
