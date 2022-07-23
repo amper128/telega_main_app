@@ -17,11 +17,11 @@
 #include <private/video.h>
 #include <stdbool.h>
 
-#define VIDEO_W (1920)
-#define VIDEO_H (1080)
+#define VIDEO_W (1280)
+#define VIDEO_H (720)
 #define VIDEO_FPS (30)
-#define BITRATE (4000000)
-#define FEC_PERCENT (5)
+#define BITRATE (2000000)
+#define FEC_PERCENT (50)
 
 int
 video_init(void)
@@ -105,11 +105,11 @@ video_main(void)
 	gst_caps_unref(ratecaps);
 
 	/* Modify the source's properties */
-	g_object_set(source, "ispdigitalgainrange", "1 2", NULL);
-	g_object_set(conv, "flip-method", 2, NULL);
+	g_object_set(source, "ispdigitalgainrange", "1 2", "wbmode", 1, "ee-mode", 0, NULL);
+	g_object_set(conv, "flip-method", 0, NULL);
 	g_object_set(encoder, "bitrate", BITRATE,
-		     /*"iframeinterval", 60, "preset-level", 0,*/ "control-rate", 1,
-		     "maxperf-enable", true, "MeasureEncoderLatency", true, NULL);
+		     "iframeinterval", 60, "preset-level", 3, "control-rate", 0,
+		     "maxperf-enable", true, "profile", 2, NULL);
 	g_object_set(rtp, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
 	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
 	g_object_set(udpsink, "host", "192.168.50.100", "port", 5600, "sync", false, "async", false,
