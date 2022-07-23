@@ -102,7 +102,7 @@ start_microservices(void)
 	    {
 		{"power", power_init, power_main, 10ULL * TIME_MS},
 		{"gps", gps_init, gps_main, 0ULL},
-		{"motion", motion_init, motion_main, 20ULL * TIME_MS},
+		{"motion", motion_init, motion_main, 50ULL * TIME_MS},
 		{"sys_stat", system_telemetry_init, system_telemetry_main, 1ULL * TIME_S},
 		{"telemetry", telemetry_init, telemetry_main, 100ULL * TIME_MS},
 		{"video", video_init, video_main, 0ULL},
