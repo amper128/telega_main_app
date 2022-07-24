@@ -7,6 +7,7 @@
  */
 
 #include <sys/prctl.h>
+#include <sys/wait.h>
 
 #include <log/log.h>
 #include <log/read.h>
@@ -131,6 +132,14 @@ main_cycle(void)
 	for (i = 0U; i < svc_count; i++) {
 		svc_list[i].ctx->watchdog = svc_get_monotime();
 		log_print(svc_list[i].name, svc_list[i].ctx->log_buffer);
+
+		int wstatus;
+		pid_t result = waitpid(svc_list[i].pid, &wstatus, WNOHANG);
+		if (result > 0) {
+			log_err("SVC '%s' PID %i EXITED", svc_list[i].name, svc_list[i].pid);
+			log_print("main", svc_main->log_buffer);
+			exit(1);
+		}
 	}
 }
 
