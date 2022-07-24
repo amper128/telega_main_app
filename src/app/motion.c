@@ -380,12 +380,64 @@ do_motion(float speed, float steering)
 	lsp = (1.0f - pscale) * left + pscale * (pspeed);
 	rsp = (1.0f - pscale) * right - pscale * (pspeed);
 
-	set_drv_duty(0U, lsp);
-	set_drv_duty(1U, rsp);
-	set_drv_duty(2U, lsp);
-	set_drv_duty(3U, rsp);
-	set_drv_duty(4U, lsp);
-	set_drv_duty(5U, rsp);
+	/* like ESP */
+	static float sd[DRIVES_COUNT] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+	float lmin = (float)abs(mt.dt[0].rpm);
+	float rmin = (float)abs(mt.dt[1].rpm);
+
+	size_t i;
+	size_t idx;
+	for (i = 1U; i < 3U; i++) {
+		/* left */
+		idx = i * 2U;
+		if ((float)abs(mt.dt[idx].rpm) < lmin) {
+			if (sd[idx] > 0.99f) {
+				lmin = (float)abs(mt.dt[idx].rpm);
+			}
+		}
+
+		/* right */
+		idx = (i * 2U) + 1U;
+		if ((float)abs(mt.dt[idx].rpm) < rmin) {
+			if (sd[idx] > 0.99f) {
+				rmin = (float)abs(mt.dt[idx].rpm);
+			}
+		}
+	}
+
+	for (i = 0U; i < 3U; i++) {
+		/* left */
+		idx = i * 2U;
+		if (abs(mt.dt[idx].rpm) >= 5) {
+			if (lmin / (float)abs(mt.dt[idx].rpm) < 0.9f) {
+				sd[idx] -= 0.05f;
+			} else {
+				sd[idx] += 0.05f;
+			}
+
+			sd[idx] = flimit(sd[idx], 1.0f, 0.0f);
+		}
+
+		/* right */
+		idx = (i * 2U) + 1U;
+		if (abs(mt.dt[idx].rpm) >= 5) {
+			if (rmin / (float)abs(mt.dt[idx].rpm) < 0.9f) {
+				sd[idx] -= 0.05f;
+			} else {
+				sd[idx] += 0.05f;
+			}
+
+			sd[idx] = flimit(sd[idx], 1.0f, 0.0f);
+		}
+	}
+
+	/* do drive */
+	set_drv_duty(0U, lsp * sd[0]);
+	set_drv_duty(1U, rsp * sd[1]);
+	set_drv_duty(2U, lsp * sd[2]);
+	set_drv_duty(3U, rsp * sd[3]);
+	set_drv_duty(4U, lsp * sd[4]);
+	set_drv_duty(5U, rsp * sd[5]);
 }
 
 static int
@@ -536,13 +588,15 @@ motion_main(void)
 						servo_tilt = 90.0f;
 					}
 
-					float light_value = (float)(r.r->axis[4] - 1500) / 500.0f * 255.0f;
+					float light_value =
+					    (float)(r.r->axis[4] - 1500) / 500.0f * 255.0f;
 					if (light_value < 0.0f) {
 						light_value = 0.0f;
 					}
 
 					uint8_t data[5] = {0xA5, (uint8_t)servo_pan,
-								   (uint8_t)servo_tilt, (uint8_t)light_value, 0U};
+							   (uint8_t)servo_tilt,
+							   (uint8_t)light_value, 0U};
 					data[4] = (uint8_t)(data[0] + data[1] + data[2] + data[3]);
 					int w = write(servo_fd, data, sizeof(data));
 					(void)w;
@@ -574,4 +628,3 @@ motion_main(void)
 
 	return result;
 }
-
