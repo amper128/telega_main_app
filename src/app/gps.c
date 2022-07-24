@@ -252,6 +252,30 @@ parse_line(const char *line)
 	}
 }
 
+static void
+sendUBX(const unsigned char *progmemBytes, size_t len, int gps_fd)
+{
+	char buf[64];
+	size_t buf_len = 2U;
+
+	buf[0] = 0xB5;
+	buf[1] = 0x62;
+
+	uint8_t a = 0, b = 0;
+	while (len-- > 0) {
+		uint8_t c = *progmemBytes++;
+		a += c;
+		b += a;
+		buf[buf_len++] = c;
+	}
+
+	buf[buf_len++] = a;
+	buf[buf_len++] = b;
+
+	ssize_t w = write(gps_fd, buf, buf_len);
+	(void)w;
+}
+
 int
 gps_init(void)
 {
@@ -275,6 +299,11 @@ gps_main(void)
 	}
 
 	shm_map_open("shm_gps", &gps_shm);
+
+	const unsigned char ubxRate10Hz[] = {0x06, 0x08, 0x06, 0x00, 100,
+					     0x00, 0x01, 0x00, 0x01, 0x00};
+
+	sendUBX(ubxRate10Hz, sizeof(ubxRate10Hz), gps_fd);
 
 	FD_ZERO(&readfs);
 	FD_SET(gps_fd, &readfs);
