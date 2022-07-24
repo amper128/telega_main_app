@@ -17,11 +17,59 @@
 #include <private/video.h>
 #include <stdbool.h>
 
+#include <svc/svc.h>
+
 #define VIDEO_W (1280)
 #define VIDEO_H (720)
 #define VIDEO_FPS (30)
 #define BITRATE (2000000)
 #define FEC_PERCENT (50)
+
+static GMainLoop *main_loop; /* GLib's Main Loop */
+
+static gboolean
+g_callback(gpointer data)
+{
+	if (!svc_cycle()) {
+		g_main_loop_quit((GMainLoop *)data);
+	}
+
+	return TRUE;
+}
+
+static gboolean
+gst_handle_message(GstBus *bus, GstMessage *msg, void *user_data)
+{
+	GError *err;
+	gchar *debug_info;
+
+	(void)bus;
+	(void)user_data;
+
+	switch (GST_MESSAGE_TYPE(msg)) {
+	case GST_MESSAGE_ERROR:
+		gst_message_parse_error(msg, &err, &debug_info);
+		g_printerr("Error received from element %s: %s\n", GST_OBJECT_NAME(msg->src),
+			   err->message);
+		g_printerr("Debugging information: %s\n", debug_info ? debug_info : "none");
+		g_clear_error(&err);
+		g_free(debug_info);
+		break;
+
+	case GST_MESSAGE_EOS:
+		g_print("End-Of-Stream reached.\n");
+		break;
+
+	default:
+		/* We should not reach here because we only asked for ERRORs and EOS */
+		g_printerr("Unexpected message received.\n");
+		break;
+	}
+
+	gst_message_unref(msg);
+
+	return true;
+}
 
 int
 video_init(void)
@@ -42,8 +90,9 @@ video_main(void)
 	GstElement *encoder;
 	GstElement *parser;
 	GstElement *rtp, *rtpfec;
-	GstMessage *msg;
 	GstStateChangeReturn ret;
+	GMainContext *context = NULL;
+	GSource *gsource = NULL;
 
 	/* Initialize GStreamer */
 	gst_init(NULL, NULL);
@@ -107,9 +156,8 @@ video_main(void)
 	/* Modify the source's properties */
 	g_object_set(source, "ispdigitalgainrange", "1 2", "wbmode", 1, "ee-mode", 0, NULL);
 	g_object_set(conv, "flip-method", 0, NULL);
-	g_object_set(encoder, "bitrate", BITRATE,
-		     "iframeinterval", 60, "preset-level", 3, "control-rate", 0,
-		     "maxperf-enable", true, "profile", 2, NULL);
+	g_object_set(encoder, "bitrate", BITRATE, "iframeinterval", 60, "preset-level", 3,
+		     "control-rate", 0, "maxperf-enable", true, "profile", 2, NULL);
 	g_object_set(rtp, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
 	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
 	g_object_set(udpsink, "host", "192.168.50.100", "port", 5600, "sync", false, "async", false,
@@ -134,38 +182,20 @@ video_main(void)
 		return -1;
 	}
 
-	/* Wait until error or EOS */
+	/* start pipeline */
 	bus = gst_element_get_bus(pipeline);
-	msg = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE,
-					 GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
+	gst_bus_add_watch(bus, (GstBusFunc)gst_handle_message, NULL);
 
-	/* Parse message */
-	if (msg != NULL) {
-		GError *err;
-		gchar *debug_info;
+	/* create g_main_loop */
+	context = g_main_context_new();
+	main_loop = g_main_loop_new(context, FALSE);
 
-		switch (GST_MESSAGE_TYPE(msg)) {
-		case GST_MESSAGE_ERROR:
-			gst_message_parse_error(msg, &err, &debug_info);
-			g_printerr("Error received from element %s: %s\n",
-				   GST_OBJECT_NAME(msg->src), err->message);
-			g_printerr("Debugging information: %s\n", debug_info ? debug_info : "none");
-			g_clear_error(&err);
-			g_free(debug_info);
-			break;
+	gsource = g_timeout_source_new_seconds(1);
+	g_source_set_callback(gsource, g_callback, main_loop, NULL);
+	g_source_attach(gsource, context);
 
-		case GST_MESSAGE_EOS:
-			g_print("End-Of-Stream reached.\n");
-			break;
-
-		default:
-			/* We should not reach here because we only asked for ERRORs and EOS */
-			g_printerr("Unexpected message received.\n");
-			break;
-		}
-
-		gst_message_unref(msg);
-	}
+	/* run g_main_loop */
+	g_main_loop_run(main_loop);
 
 	/* Free resources */
 	gst_object_unref(bus);
