@@ -414,9 +414,10 @@ do_motion(float speed, float steering)
 			} else {
 				sd[idx] += 0.05f;
 			}
-
-			sd[idx] = flimit(sd[idx], 1.0f, 0.0f);
+		} else {
+			sd[idx] += 0.05f;
 		}
+		sd[idx] = flimit(sd[idx], 1.0f, 0.0f);
 
 		/* right */
 		idx = (i * 2U) + 1U;
@@ -426,9 +427,10 @@ do_motion(float speed, float steering)
 			} else {
 				sd[idx] += 0.05f;
 			}
-
-			sd[idx] = flimit(sd[idx], 1.0f, 0.0f);
+		} else {
+			sd[idx] += 0.05f;
 		}
+		sd[idx] = flimit(sd[idx], 1.0f, 0.0f);
 	}
 
 	/* do drive */
