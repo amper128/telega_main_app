@@ -176,7 +176,7 @@ parse_msg(const struct can_packet_t *msg)
 
 		mt.dt[drive_id].rpm = vesc_read_i32(u.status->rpm);
 		mt.dt[drive_id].current_X10 = vesc_read_i16(u.status->current_X10);
-		mt.dt[drive_id].duty_X100 = vesc_read_i16(u.status->duty_X100) & 0x7FFF;
+		mt.dt[drive_id].duty_X100 = vesc_read_i16(u.status->duty_X100);
 
 		/*log_inf("rpm: %i, current: %.1f, duty: %.3f", mt.dt[drive_id].rpm,
 			vesc_read_float2(u.status->current_X10, 10.0),
