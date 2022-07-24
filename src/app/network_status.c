@@ -39,8 +39,9 @@ get_modem_state(GDBusProxy *ifproxy)
 
 	ret = g_dbus_proxy_call_sync(
 	    ifproxy, MM_DBUS_GET_PROPERTIES,
-	    g_variant_new("(ss)", "org.freedesktop.ModemManager1.Modem", "CurrentModes"),
+	    g_variant_new("(ss)", "org.freedesktop.ModemManager1.Modem", "State"),
 	    G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
+
 	if (!ret) {
 		g_dbus_error_strip_remote_error(error);
 		log_err("Failed to get property: %s", error->message);
@@ -51,7 +52,7 @@ get_modem_state(GDBusProxy *ifproxy)
 	g_variant_get(ret, "(v)", &ret1);
 	g_variant_unref(ret);
 
-	g_variant_get(ret1, "(uu)", &state);
+	g_variant_get(ret1, "i", &state);
 	g_variant_unref(ret1);
 
 	return state;
@@ -63,6 +64,7 @@ get_modem_signal(GDBusProxy *ifproxy)
 	GError *error = NULL;
 	GVariant *ret, *ret1;
 	guint32 signal;
+	gboolean recently;
 
 	ret = g_dbus_proxy_call_sync(
 	    ifproxy, MM_DBUS_GET_PROPERTIES,
@@ -78,7 +80,7 @@ get_modem_signal(GDBusProxy *ifproxy)
 	g_variant_get(ret, "(v)", &ret1);
 	g_variant_unref(ret);
 
-	g_variant_get(ret1, "(ub)", &signal);
+	g_variant_get(ret1, "(ub)", &signal, &recently);
 	g_variant_unref(ret1);
 
 	return (int32_t)signal;
@@ -89,7 +91,7 @@ get_modem_mode(GDBusProxy *ifproxy)
 {
 	GError *error = NULL;
 	GVariant *ret, *ret1;
-	guint32 mode;
+	guint32 mode, preferred;
 
 	ret = g_dbus_proxy_call_sync(
 	    ifproxy, MM_DBUS_GET_PROPERTIES,
@@ -105,7 +107,7 @@ get_modem_mode(GDBusProxy *ifproxy)
 	g_variant_get(ret, "(v)", &ret1);
 	g_variant_unref(ret);
 
-	g_variant_get(ret1, "(uu)", &mode);
+	g_variant_get(ret1, "(uu)", &mode, &preferred);
 	g_variant_unref(ret1);
 
 	return (int32_t)mode;
@@ -146,43 +148,50 @@ modem_status(const char *path)
 	};
 
 	GDBusProxy *ifproxy;
+	GError *error = NULL;
 
 	ifproxy = g_dbus_proxy_new_for_bus_sync(G_BUS_TYPE_SYSTEM, G_DBUS_PROXY_FLAGS_NONE, NULL,
 						MM_DBUS_SERVICE, path,
-						"org.freedesktop.DBus.Properties", NULL, NULL);
-	g_assert(ifproxy);
-
-	int32_t state = get_modem_state(ifproxy);
-	if (state >= 0) {
-		ms.Status = (uint8_t)state;
-	}
-
-	int32_t signal = get_modem_signal(ifproxy);
-	if (signal >= 0) {
-		ms.Signal = (uint8_t)signal;
-	}
-
-	int32_t mode = get_modem_mode(ifproxy);
-	if (mode >= 0) {
-		if (mode & MM_MODEM_MODE_4G) {
-			ms.Mode = MMODE_4G;
-		} else if (mode & MM_MODEM_MODE_3G) {
-			ms.Mode = MMODE_3G;
-		} else if (mode & MM_MODEM_MODE_2G) {
-			ms.Mode = MMODE_2G;
-		} else if (mode & MM_MODEM_MODE_CS) {
-			ms.Mode = MMODE_CS;
-		} else {
-			ms.Mode = 0;
+						"org.freedesktop.DBus.Properties", NULL, &error);
+	if (ifproxy != NULL) {
+		int32_t state = get_modem_state(ifproxy);
+		if (state >= 0) {
+			ms.Status = (uint8_t)state;
 		}
-	}
 
-	const char *name = get_modem_operator_name(ifproxy);
-	if (name != NULL) {
-		strncpy(ms.OpName, name, OPNAMELEN - 1U);
-	}
+		int32_t signal = get_modem_signal(ifproxy);
+		if (signal >= 0) {
+			ms.Signal = (uint8_t)signal;
+		}
 
-	shm_map_write(&modem_status_shm, &ms, sizeof(modem_status_t));
+		int32_t mode = get_modem_mode(ifproxy);
+		if (mode >= 0) {
+			if (mode & MM_MODEM_MODE_4G) {
+				ms.Mode = MMODE_4G;
+			} else if (mode & MM_MODEM_MODE_3G) {
+				ms.Mode = MMODE_3G;
+			} else if (mode & MM_MODEM_MODE_2G) {
+				ms.Mode = MMODE_2G;
+			} else if (mode & MM_MODEM_MODE_CS) {
+				ms.Mode = MMODE_CS;
+			} else {
+				ms.Mode = 0;
+			}
+		}
+
+		const char *name = get_modem_operator_name(ifproxy);
+		if (name != NULL) {
+			strncpy(ms.OpName, name, OPNAMELEN - 1U);
+		}
+
+		shm_map_write(&modem_status_shm, &ms, sizeof(modem_status_t));
+
+		g_object_unref(ifproxy);
+	} else {
+		g_dbus_error_strip_remote_error(error);
+		log_err("g_dbus_proxy_new_for_bus_sync failed: %s", error->message);
+		g_error_free(error);
+	}
 }
 
 static void
@@ -190,37 +199,43 @@ list_modems(void)
 {
 	GDBusProxy *proxy;
 	GError *error = NULL;
-	GVariant *ret;
 
 	proxy = g_dbus_proxy_new_for_bus_sync(G_BUS_TYPE_SYSTEM, G_DBUS_PROXY_FLAGS_NONE, NULL,
 					      MM_DBUS_SERVICE, MM_DBUS_PATH,
 					      "org.freedesktop.DBus.ObjectManager", NULL, &error);
-	g_assert(proxy != NULL);
+	if (proxy != NULL) {
+		GVariant *ret;
+		ret = g_dbus_proxy_call_sync(proxy, "GetManagedObjects", NULL,
+					     G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
+		if (!ret) {
+			g_dbus_error_strip_remote_error(error);
+			log_err("GetManagedObjects failed: %s", error->message);
+			g_error_free(error);
+		} else {
+			GVariant *result;
+			const gchar *object_path;
+			GVariantIter i;
+			GVariant *ifaces_and_properties;
 
-	ret = g_dbus_proxy_call_sync(proxy, "GetManagedObjects", NULL, G_DBUS_CALL_FLAGS_NONE, -1,
-				     NULL, &error);
-	if (!ret) {
+			result = g_variant_get_child_value(ret, 0);
+			g_variant_iter_init(&i, result);
+			/* (a{oa{sa{sv}}}) */
+			while (g_variant_iter_next(&i, "{&o@a{sa{sv}}}", &object_path,
+						   &ifaces_and_properties)) {
+				modem_status(object_path);
+				/* supports only one modem */
+				break;
+			}
+			g_variant_unref(result);
+			g_variant_unref(ret);
+		}
+
+		g_object_unref(proxy);
+	} else {
 		g_dbus_error_strip_remote_error(error);
-		log_err("GetManagedObjects failed: %s", error->message);
+		log_err("g_dbus_proxy_new_for_bus_sync failed: %s", error->message);
 		g_error_free(error);
-		return;
 	}
-
-	GVariant *result;
-	const gchar *object_path;
-	GVariantIter i;
-	GVariant *ifaces_and_properties;
-
-	result = g_variant_get_child_value(ret, 0);
-	g_variant_iter_init(&i, result);
-	/* (a{oa{sa{sv}}}) */
-	while (g_variant_iter_next(&i, "{&o@a{sa{sv}}}", &object_path, &ifaces_and_properties)) {
-		modem_status(object_path);
-		/* supports only one modem */
-		break;
-	}
-	g_variant_unref(result);
-	g_variant_unref(ret);
 }
 
 int
@@ -250,6 +265,10 @@ int
 network_status_main(void)
 {
 	while (svc_cycle()) {
+		while (g_main_context_pending(NULL)) {
+			g_main_context_iteration(NULL, TRUE);
+		}
+
 		list_modems();
 	}
 
