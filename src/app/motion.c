@@ -23,6 +23,38 @@
 
 #define DEADZONE (0.05f)
 
+#define BTN_F1 (0x4U)
+#define BTN_F2 (0x4U)
+#define BTN_F3 (0x4U)
+
+#define BTN_FIRE (0x1U)
+#define BTN_CH1 (0x10U) /* btn[1] */
+#define BTN_CH2 (0x20U) /* btn[1] */
+
+#define BTN_A2 (0x4U)
+#define BTN_B1 (0x8U)
+#define BTN_D1 (0x4000U) /* btn[1] */
+
+#define BTN_POV_CENTER (0x10U)
+
+#define BTN_A3_UP (0x20U)
+#define BTN_A3_RIGHT (0x40U)
+#define BTN_A3_DOWN (0x80U)
+#define BTN_A3_LEFT (0x100U)
+#define BTN_A3_CENTER (0x100U)
+
+#define BTN_A4_UP (0x400U)
+#define BTN_A4_RIGHT (0x800U)
+#define BTN_A4_DOWN (0x1000U)
+#define BTN_A4_LEFT (0x2000U)
+#define BTN_A4_CENTER (0x4000U)
+
+#define BTN_C1_UP (0x8000U)
+#define BTN_C1_RIGHT (0x1U)  /* btn[1] */
+#define BTN_C1_DOWN (0x2U)   /* btn[1] */
+#define BTN_C1_LEFT (0x4U)   /* btn[1] */
+#define BTN_C1_CENTER (0x8U) /* btn[1] */
+
 static shm_t motion_telemetry_shm;
 
 static motion_telemetry_t mt;
@@ -478,6 +510,79 @@ serial_open(const char *name, const speed_t baud)
 	return fd;
 }
 
+struct rc_data_t {
+	/*uint32_t seqno;
+	int16_t res;*/
+	int16_t axis[6];
+	uint16_t buttons[4];
+	int8_t sq;
+};
+
+static void
+camera_control(struct rc_data_t *rc)
+{
+	static float servo_pan = 90.0f;
+	static float servo_tilt = 90.0f;
+	float pan = (float)(rc->axis[2] - 1500) / 500.0f * 4.0f;
+	if (fabsf(pan) > 0.1f) {
+		servo_pan += pan;
+	}
+
+	if (servo_pan > 180.0f) {
+		servo_pan = 180.0f;
+	}
+	if (servo_pan < 0.0f) {
+		servo_pan = 0.0f;
+	}
+
+	float tilt = (float)(rc->axis[3] - 1500) / 500.0f * 4.0f;
+	if (fabsf(tilt) > 0.1f) {
+		servo_tilt += tilt;
+	}
+
+	if (servo_tilt > 160.0f) {
+		servo_tilt = 160.0f;
+	}
+	if (servo_tilt < 60.0f) {
+		servo_tilt = 60.0f;
+	}
+
+	if (rc->buttons[0] & BTN_POV_CENTER) {
+		servo_pan = 90.0f;
+		servo_tilt = 90.0f;
+	}
+
+	if (rc->buttons[0] & BTN_A3_UP) {
+		servo_pan = 90.0f;
+		servo_tilt = 160.0f;
+	}
+
+	if (rc->buttons[0] & BTN_A3_RIGHT) {
+		servo_pan = 180.0f;
+		servo_tilt = 100.0f;
+	}
+
+	if (rc->buttons[0] & BTN_A3_DOWN) {
+		servo_pan = 90.0f;
+		servo_tilt = 70.0f;
+	}
+
+	if (rc->buttons[0] & BTN_A3_LEFT) {
+		servo_pan = 0.0f;
+		servo_tilt = 100.0f;
+	}
+
+	float light_value = (float)(rc->axis[4] - 1500) / 500.0f * 255.0f;
+	if (light_value < 0.0f) {
+		light_value = 0.0f;
+	}
+
+	uint8_t data[5] = {0xA5, (uint8_t)servo_pan, (uint8_t)servo_tilt, (uint8_t)light_value, 0U};
+	data[4] = (uint8_t)(data[0] + data[1] + data[2] + data[3]);
+	ssize_t w = write(servo_fd, data, sizeof(data));
+	(void)w;
+}
+
 int
 motion_init(void)
 {
@@ -541,67 +646,15 @@ motion_main(void)
 					     (struct sockaddr *)&rc_sockaddr, &slen_rc);
 
 				if (data_len > 0) {
-					struct _r {
-						/*uint32_t seqno;
-						int16_t res;*/
-						int16_t axis[6];
-						int16_t data[4];
-						int8_t sq;
-					};
 
 					union {
-						struct _r *r;
+						struct rc_data_t *r;
 						uint8_t *u8;
 					} r;
 
 					r.u8 = rc_data;
 
-					static float servo_pan = 90.0f;
-					static float servo_tilt = 90.0f;
-					float pan = (float)(r.r->axis[2] - 1500) / 500.0f * 4.0f;
-					if (fabs(pan) > 0.1f) {
-						servo_pan += pan;
-					}
-					/*servo_pan *= 90.0f;
-					servo_pan += 90.0f + 5.0f;*/
-
-					if (servo_pan > 180.0f) {
-						servo_pan = 180.0f;
-					}
-					if (servo_pan < 0.0f) {
-						servo_pan = 0.0f;
-					}
-
-					float tilt = (float)(r.r->axis[3] - 1500) / 500.0f * 4.0f;
-					if (fabs(tilt) > 0.1f) {
-						servo_tilt += tilt;
-					}
-					/*servo_tilt *= 90.0f;
-					servo_tilt += 90.0f + 8.0f;*/
-					if (servo_tilt > 160.0f) {
-						servo_tilt = 160.0f;
-					}
-					if (servo_tilt < 60.0f) {
-						servo_tilt = 60.0f;
-					}
-
-					if (r.r->data[0] & 0x1000U) {
-						servo_pan = 90.0f;
-						servo_tilt = 90.0f;
-					}
-
-					float light_value =
-					    (float)(r.r->axis[4] - 1500) / 500.0f * 255.0f;
-					if (light_value < 0.0f) {
-						light_value = 0.0f;
-					}
-
-					uint8_t data[5] = {0xA5, (uint8_t)servo_pan,
-							   (uint8_t)servo_tilt,
-							   (uint8_t)light_value, 0U};
-					data[4] = (uint8_t)(data[0] + data[1] + data[2] + data[3]);
-					int w = write(servo_fd, data, sizeof(data));
-					(void)w;
+					camera_control(r.r);
 
 					speed = (float)(r.r->axis[1] - 1500) / 500.0f;
 					steering = (float)(r.r->axis[0] - 1500) / 500.0f;
