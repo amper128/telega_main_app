@@ -16,6 +16,7 @@ pkg_check_modules(GIO REQUIRED gio-2.0)
 file(GLOB_RECURSE app_headers "include/*.h")
 
 add_executable(${PROJECT_NAME}
+	audio.c
 	gps.c
 	main.c
 	minmea.c

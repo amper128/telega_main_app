@@ -15,6 +15,7 @@
 #include <svc/svc.h>
 #include <svc/timerfd.h>
 
+#include <private/audio.h>
 #include <private/gps.h>
 #include <private/motion.h>
 #include <private/network_status.h>
@@ -107,9 +108,10 @@ start_microservices(void)
 		{"sys_stat", system_telemetry_init, system_telemetry_main, 1ULL * TIME_S},
 		{"telemetry", telemetry_init, telemetry_main, 100ULL * TIME_MS},
 		{"video", video_init, video_main, 0ULL},
+		{"audio", audio_init, audio_main, 0ULL},
 		{"netinfo", network_status_init, network_status_main, 1ULL * TIME_S},
 	    },
-	    7U};
+	    8U};
 
 	size_t i;
 
