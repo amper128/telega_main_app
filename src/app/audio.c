@@ -1,7 +1,6 @@
 /*
  * gst-launch-1.0 \
- *	alsasrc provide-clock=true buffer-time=8000 latency-time=8000 \
- *	actual-latency-time=1000 actual-buffer-time=8000 do-timestamp=true ! \
+ *	alsasrc provide-clock=true buffer-time=8000 latency-time=8000 do-timestamp=true ! \
  *	audioconvert ! audioresample ! \
  *	queue ! \
  *	opusenc ! opusparse ! \
@@ -76,11 +75,8 @@ audio_init(void)
 int
 audio_main(void)
 {
-	GstElement *pipeline, *source, *caps, *udpsink;
+	GstElement *pipeline, *source, *udpsink;
 	GstBus *bus;
-	GstCaps *filtercaps;
-	GstStructure *srcstructure;
-	GstCapsFeatures *feat;
 	GstElement *conv, *resample, *encoder_q;
 	GstElement *encoder;
 	GstElement *parser;
@@ -93,14 +89,22 @@ audio_main(void)
 	gst_init(NULL, NULL);
 
 	/* Create the elements */
+	/* alsasrc provide-clock=true buffer-time=8000 latency-time=8000 do-timestamp=true */
 	source = gst_element_factory_make("alsasrc", "source");
+	/* audioconvert */
 	conv = gst_element_factory_make("audioconvert", "audconv");
+	/* audioresample */
 	resample = gst_element_factory_make("audioresample", "audresmaple");
+	/* queue */
 	encoder_q = gst_element_factory_make("queue", "encoderq");
+	/* opusenc */
 	encoder = gst_element_factory_make("opusenc", "opusencoder");
+	/* opusparse */
 	parser = gst_element_factory_make("opusparse", "parser-opus");
+	/* rtpopuspay mtu=1420 pt=96 */
 	rtp = gst_element_factory_make("rtpopuspay", "rtp");
 	rtpfec = gst_element_factory_make("rtpulpfecenc", "rtpfec");
+	/* udpsink host=192.168.50.100 port=5610 sync=false async=false*/
 	udpsink = gst_element_factory_make("udpsink", "destination");
 
 	/* Create the empty pipeline */
@@ -112,50 +116,21 @@ audio_main(void)
 		return -1;
 	}
 
-	caps = gst_element_factory_make("capsfilter", "filter");
-	g_assert(caps != NULL); /* should always exist */
-
-	filtercaps = gst_caps_new_empty();
-
-	srcstructure = gst_structure_new("audio/x-raw", "channels", G_TYPE_INT, 1, NULL);
-	if (!srcstructure) {
-		g_printerr("Unable to create caps.\n");
-		gst_object_unref(pipeline);
-		gst_caps_unref(filtercaps);
-		return -1;
-	}
-
-	feat = gst_caps_features_new("memory:NVMM", NULL);
-	if (!feat) {
-		g_printerr("Unable to create feature.\n");
-		gst_object_unref(pipeline);
-		gst_caps_unref(filtercaps);
-		gst_object_unref(srcstructure);
-		return -1;
-	}
-
-	gst_caps_append_structure_full(filtercaps, srcstructure, feat);
-
-	g_object_set(G_OBJECT(caps), "caps", filtercaps, NULL);
-	gst_caps_unref(filtercaps);
-
 	/* Modify the source's properties */
 	g_object_set(source, "provide-clock", true, "buffer-time", 1000, "latency-time", 1000,
-		     "actual-latency-time", 1000, "actual-buffer-time", 1000, "do-timestamp", true,
-		     NULL);
+		     "do-timestamp", true, NULL);
 
 	g_object_set(encoder, "bitrate", BITRATE, NULL);
-	g_object_set(rtp, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
+	g_object_set(rtp, "mtu", 1420, "pt", 96, NULL);
 	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
 	g_object_set(udpsink, "host", "192.168.50.100", "port", 5610, "sync", false, "async", false,
 		     NULL);
 
 	/* Build the pipeline */
-	gst_bin_add_many(GST_BIN(pipeline), source, caps, conv,
-			 /*encoder_q, */ /*rate, ratec,*/ encoder, parser, rtp, rtpfec, udpsink,
-			 NULL);
-	if (gst_element_link_many(source, caps, conv, /*encoder_q,*/ /* rate, ratec,*/ encoder,
-				  parser, rtp, rtpfec, udpsink, NULL) != TRUE) {
+	gst_bin_add_many(GST_BIN(pipeline), source, conv, resample, encoder_q, encoder, parser, rtp,
+			 rtpfec, udpsink, NULL);
+	if (gst_element_link_many(source, conv, resample, encoder_q, encoder, parser, rtp, rtpfec,
+				  udpsink, NULL) != TRUE) {
 		g_printerr("Elements could not be linked.\n");
 		gst_object_unref(pipeline);
 		return -1;
