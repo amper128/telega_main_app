@@ -225,7 +225,7 @@ parse_line(const char *line)
 
 			tmp_gps_status.latitude = minmea_tocoord(&frame.latitude);
 			tmp_gps_status.longitude = minmea_tocoord(&frame.longitude);
-			tmp_gps_status.speed = minmea_tofloat(&frame.speed);
+			tmp_gps_status.speed = minmea_tofloat(&frame.speed) * 1.852f;
 			tmp_gps_status.course = minmea_tofloat(&frame.course);
 
 			shm_map_write(&gps_shm, &tmp_gps_status, sizeof(tmp_gps_status));
