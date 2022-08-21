@@ -174,7 +174,7 @@ parse_line(const char *line)
 		if (minmea_parse_gga(&frame, line)) {
 			// log_dbg("$xxGGA: fix quality: %d", frame.fix_quality);
 			if (frame.fix_quality > 0) {
-				tmp_gps_status.has_fix = true;
+				tmp_gps_status.fix_type = (uint8_t)frame.fix_quality;
 
 				tmp_gps_status.latitude = minmea_tocoord(&frame.latitude);
 				tmp_gps_status.longitude = minmea_tocoord(&frame.longitude);
@@ -184,7 +184,7 @@ parse_line(const char *line)
 
 				tmp_gps_status.sats_use = (uint8_t)frame.satellites_tracked;
 			} else {
-				tmp_gps_status.has_fix = false;
+				tmp_gps_status.fix_type = 0U;
 			}
 		} else {
 			log_warn("$xxGGA sentence is not parsed");

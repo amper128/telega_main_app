@@ -61,6 +61,7 @@ read_gps_status(RC_td_t *td)
 	conv = gps_status->hdop;
 	td->gps.HDOPx10 = (uint8_t)(conv * 10.0f);
 
+	td->gps.FixType = gps_status->fix_type;
 	td->gps.SatsInUse = gps_status->sats_use;
 	td->gps.SatsInView = gps_status->sats_view;
 }

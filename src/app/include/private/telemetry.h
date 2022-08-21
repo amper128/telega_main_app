@@ -49,7 +49,7 @@ typedef struct {
 		uint8_t HDOPx10;	// -fl hdop- GPS HDOP * 10
 		uint8_t SatsInView;	// -u8 sats- satellites in view
 		uint8_t SatsInUse;	// -u8 sats- satellites used for navigation
-		uint8_t __pad;		//
+		uint8_t FixType;	//
 		uint16_t SpeedKPHX10;	// -fl speed- ( km/h * 10 )
 		uint16_t CourseDegrees; // -u16 coursedegrees- GPS course over ground, in degrees
 	} gps;

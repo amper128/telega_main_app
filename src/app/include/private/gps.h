@@ -23,7 +23,7 @@ typedef struct {
 	uint8_t sats_use;
 	uint8_t sats_view;
 
-	bool has_fix;
+	uint8_t fix_type;
 } gps_status_t;
 
 int gps_init(void);
