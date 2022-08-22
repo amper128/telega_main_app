@@ -96,6 +96,11 @@ vesc_read_i16(const uint16_t data)
 		int16_t i;
 	} u;
 
+	/* костыль */
+	if (data == 0x0080) {
+		return 0;
+	}
+
 	u.u = __bswap_constant_16(data);
 
 	return u.i;
