@@ -101,7 +101,7 @@ vesc_read_i16(const uint16_t data)
 		return 0;
 	}
 
-	u.u = __bswap_constant_16(data);
+	u.u = __bswap_16(data);
 
 	return u.i;
 }
@@ -119,7 +119,7 @@ vesc_read_i32(const uint32_t data)
 		int32_t i;
 	} u;
 
-	u.u = __bswap_constant_32(data);
+	u.u = __bswap_32(data);
 
 	return u.i;
 }
@@ -138,7 +138,7 @@ vesc_read_float2(const uint16_t data, double div)
 		int16_t i;
 	} u;
 
-	u.u = __bswap_constant_16(data);
+	u.u = __bswap_16(data);
 
 	double f = (double)u.i;
 
@@ -159,7 +159,7 @@ vesc_read_float4(const uint32_t data, double div)
 		int16_t i;
 	} u;
 
-	u.u = __bswap_constant_16(data);
+	u.u = __bswap_16(data);
 
 	double f = (double)u.i;
 
@@ -181,7 +181,7 @@ vesc_write_i32(const int32_t data, uint8_t *dest)
 		uint8_t u8[4];
 	} v;
 
-	v.u = __bswap_constant_32(*u.u);
+	v.u = __bswap_32(*u.u);
 	memcpy(dest, v.u8, 4U);
 }
 
