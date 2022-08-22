@@ -119,7 +119,7 @@ read_drives_status(RC_td_t *td)
 
 	conv = 0.0;
 	for (i = 0U; i < DRIVES_COUNT; i++) {
-		conv += (double)p.s->dt[i].current_in_X10;
+		conv += (double)p.s->dt[i].current_X10;
 	}
 	td->power.PackCurrentX10 = (uint16_t)conv;
 
