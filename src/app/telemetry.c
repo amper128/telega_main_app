@@ -88,7 +88,7 @@ read_sensors_status(RC_td_t *td)
 	td->power.PackVoltageX100 = (uint16_t)(conv * 100.0);
 
 	conv = p.s->curr;
-	td->power.PackCurrentX10 = (uint16_t)(conv * 10.0);
+	td->power.PackCurrentX10 = (int16_t)(conv * 10.0);
 
 	conv = p.s->pwr;
 	td->power.mAHConsumed = (uint16_t)conv;
@@ -121,7 +121,7 @@ read_drives_status(RC_td_t *td)
 	for (i = 0U; i < DRIVES_COUNT; i++) {
 		conv += (double)p.s->dt[i].current_X10;
 	}
-	td->power.PackCurrentX10 = (uint16_t)conv;
+	td->power.PackCurrentX10 = (int16_t)conv;
 
 	for (i = 0U; i < DRIVES_COUNT; i++) {
 		td->drives[i].rpm = p.s->dt[i].rpm;

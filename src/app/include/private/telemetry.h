@@ -22,7 +22,7 @@ typedef struct {
 
 	struct {
 		uint16_t PackVoltageX100; // -fl voltage-
-		uint16_t PackCurrentX10;  // -fl ampere-
+		int16_t PackCurrentX10;	  // -fl ampere-
 		uint16_t mAHConsumed;	  // -u16 mahconsumed-
 		uint16_t __pad;
 	} power;
