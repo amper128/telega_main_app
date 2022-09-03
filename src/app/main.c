@@ -108,10 +108,11 @@ start_microservices(void)
 		{"sys_stat", system_telemetry_init, system_telemetry_main, 1ULL * TIME_S},
 		{"telemetry", telemetry_init, telemetry_main, 100ULL * TIME_MS},
 		{"video", video_init, video_main, 0ULL},
+		{"video_pip", video_init, video_pip_main, 0ULL},
 		{"audio", audio_init, audio_main, 0ULL},
 		{"netinfo", network_status_init, network_status_main, 1ULL * TIME_S},
 	    },
-	    8U};
+	    9U};
 
 	size_t i;
 

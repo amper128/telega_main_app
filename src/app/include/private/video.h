@@ -11,3 +11,5 @@
 int video_init(void);
 
 int video_main(void);
+
+int video_pip_main(void);
