@@ -14,6 +14,7 @@ pkg_check_modules(DBUS REQUIRED dbus-glib-1)
 pkg_check_modules(GIO REQUIRED gio-2.0)
 
 file(GLOB_RECURSE app_headers "include/*.h")
+file(GLOB_RECURSE global_headers "${PROJECT_SOURCE_DIR}/include/*.h")
 
 add_executable(${PROJECT_NAME}
 	audio.c
@@ -27,6 +28,7 @@ add_executable(${PROJECT_NAME}
 	telemetry.c
 	video.c
 	${app_headers}
+	${global_headers}
 	)
 
 target_include_directories(${PROJECT_NAME}
