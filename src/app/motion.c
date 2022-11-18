@@ -675,7 +675,7 @@ control_side_lights(bool connected)
 			/* green */
 			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
 			msg.len = 4U;
-			msg.data[0U] = 1U;
+			msg.data[0U] = 0U;
 			msg.data[1U] = 0U;
 			msg.data[2U] = 255U;
 			msg.data[3U] = 0U;
@@ -690,7 +690,7 @@ control_side_lights(bool connected)
 			/* dark orange */
 			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
 			msg.len = 4U;
-			msg.data[0U] = 1U;
+			msg.data[0U] = 0U;
 			msg.data[1U] = 64U;
 			msg.data[2U] = 32U;
 			msg.data[3U] = 0U;
