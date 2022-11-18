@@ -653,6 +653,53 @@ control_tail_lights(float speed)
 }
 
 static void
+control_side_lights(bool connected)
+{
+	static bool state = false;
+
+	if (state != connected) {
+		state = connected;
+
+		struct can_packet_t msg = {
+		    0,
+		};
+		msg.hdr.id = 100U;
+
+		if (connected) {
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_MODE;
+			msg.len = 2U;
+			msg.data[0U] = 0U;
+			msg.data[1U] = (uint8_t)LEDS_MODE_RUNNING_SHAPE;
+			send_can_msg(&msg);
+
+			/* green */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
+			msg.len = 4U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 0U;
+			msg.data[2U] = 255U;
+			msg.data[3U] = 0U;
+			send_can_msg(&msg);
+		} else {
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_MODE;
+			msg.len = 2U;
+			msg.data[0U] = 0U;
+			msg.data[1U] = (uint8_t)LEDS_MODE_FADING;
+			send_can_msg(&msg);
+
+			/* dark orange */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
+			msg.len = 4U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 64U;
+			msg.data[2U] = 32U;
+			msg.data[3U] = 0U;
+			send_can_msg(&msg);
+		}
+	}
+}
+
+static void
 send_lights_sync(uint32_t counter)
 {
 	struct can_packet_t msg = {
@@ -667,6 +714,7 @@ send_lights_sync(uint32_t counter)
 	u.u32 = counter;
 
 	msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SYNC;
+	msg.hdr.id = 100U;
 	msg.len = 4U;
 	msg.data[0U] = u.u8[0];
 	msg.data[1U] = u.u8[1];
@@ -881,6 +929,7 @@ motion_main(void)
 
 			do_motion(speed, steering);
 
+			control_side_lights(rc_connected);
 			control_tail_lights(speed);
 			send_lights_sync(l_counter++);
 		}
