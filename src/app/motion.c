@@ -479,6 +479,202 @@ do_motion(float speed, float steering)
 	set_drv_duty(5U, rsp * sd[5]);
 }
 
+/**
+ * @brief режимы работы задних фонарей
+ */
+typedef enum {
+	TAIL_LIGHT_MODE_NORMAL,	       /**< @brief габариты */
+	TAIL_LIGHT_MODE_BRAKING,       /**< @brief торможение */
+	TAIL_LIGHT_MODE_EXTRA_BRAKING, /**< @brief резкое торможение */
+	TAIL_LIGHT_MODE_BACK	       /**< @brief задний ход */
+} tail_light_mode_t;
+
+static void
+set_tail_light_mode(tail_light_mode_t mode)
+{
+	static tail_light_mode_t cur_mode = TAIL_LIGHT_MODE_NORMAL;
+	if (cur_mode != mode) {
+		struct can_packet_t msg = {
+		    0,
+		};
+
+		cur_mode = mode;
+
+		msg.hdr.id = 100U;
+
+		switch (mode) {
+		default:
+		case TAIL_LIGHT_MODE_NORMAL:
+			/* static color */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_MODE;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = (uint8_t)LEDS_MODE_STATIC_COLOR;
+			send_can_msg(&msg);
+
+			/* red */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
+			msg.len = 4U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 255U;
+			msg.data[2U] = 0U;
+			msg.data[3U] = 0U;
+			send_can_msg(&msg);
+
+			/* brightness */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_BRIGHTNESS;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 32U;
+			send_can_msg(&msg);
+			break;
+
+		case TAIL_LIGHT_MODE_BRAKING:
+			/* static color */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_MODE;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = (uint8_t)LEDS_MODE_STATIC_COLOR;
+			send_can_msg(&msg);
+
+			/* red */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
+			msg.len = 4U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 255U;
+			msg.data[2U] = 0U;
+			msg.data[3U] = 0U;
+			send_can_msg(&msg);
+
+			/* brightness */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_BRIGHTNESS;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 255U;
+			send_can_msg(&msg);
+			break;
+
+		case TAIL_LIGHT_MODE_EXTRA_BRAKING:
+			/* static color */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_MODE;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = (uint8_t)LEDS_MODE_BLINKING;
+			send_can_msg(&msg);
+
+			/* red */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
+			msg.len = 4U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 255U;
+			msg.data[2U] = 0U;
+			msg.data[3U] = 0U;
+			send_can_msg(&msg);
+
+			/* brightness */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_BRIGHTNESS;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 255U;
+			send_can_msg(&msg);
+
+			/* period */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_PERIOD;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 5U;
+			send_can_msg(&msg);
+			break;
+
+		case TAIL_LIGHT_MODE_BACK:
+			/* static color */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_MODE;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = (uint8_t)LEDS_MODE_STATIC_COLOR;
+			send_can_msg(&msg);
+
+			/* red */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_COLOR;
+			msg.len = 4U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 255U;
+			msg.data[2U] = 255U;
+			msg.data[3U] = 255U;
+			send_can_msg(&msg);
+
+			/* brightness */
+			msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_BRIGHTNESS;
+			msg.len = 2U;
+			msg.data[0U] = 1U;
+			msg.data[1U] = 255U;
+			send_can_msg(&msg);
+			break;
+		}
+	}
+}
+
+static void
+control_tail_lights(float speed)
+{
+	static float sp_acc[16U];
+	static size_t acc_pos = 0U;
+	static float acc_value;
+	static const float delta = 0.05f;
+
+	sp_acc[acc_pos % 16U] = speed;
+	acc_value += speed;
+	acc_value -= sp_acc[(acc_pos + 1U) % 16U];
+	acc_pos++;
+
+	float acc_speed = acc_value / 16.0f;
+
+	if (speed > 0.0f) {
+		/* forward */
+		if (speed < (acc_speed - (3.0f * delta))) {
+			/* extreme braking */
+			set_tail_light_mode(TAIL_LIGHT_MODE_EXTRA_BRAKING);
+		} else if (speed < (acc_speed - delta)) {
+			/* braking */
+			set_tail_light_mode(TAIL_LIGHT_MODE_BRAKING);
+		} else {
+			/* normal */
+			set_tail_light_mode(TAIL_LIGHT_MODE_NORMAL);
+		}
+	} else {
+		if (speed < -delta) {
+			/* backward */
+			set_tail_light_mode(TAIL_LIGHT_MODE_BACK);
+		} else {
+			/* normal */
+			set_tail_light_mode(TAIL_LIGHT_MODE_NORMAL);
+		}
+	}
+}
+
+static void
+send_lights_sync(uint32_t counter)
+{
+	struct can_packet_t msg = {
+	    0,
+	};
+
+	union {
+		uint32_t u32;
+		uint8_t u8[4U];
+	} u;
+
+	u.u32 = counter;
+
+	msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SYNC;
+	msg.len = 4U;
+	msg.data[0U] = u.u8[0];
+	msg.data[1U] = u.u8[1];
+	msg.data[2U] = u.u8[2];
+	msg.data[3U] = u.u8[3];
+	send_can_msg(&msg);
+}
+
 static int
 serial_open(const char *name, const speed_t baud)
 {
@@ -640,6 +836,7 @@ motion_main(void)
 
 		uint64_t last_rc_rx = svc_get_monotime();
 		bool rc_connected = false;
+		uint32_t l_counter = 0U;
 
 		while (svc_cycle()) {
 			uint64_t mono = svc_get_monotime();
@@ -683,6 +880,9 @@ motion_main(void)
 			}
 
 			do_motion(speed, steering);
+
+			control_tail_lights(speed);
+			send_lights_sync(l_counter++);
 		}
 	} while (0);
 
