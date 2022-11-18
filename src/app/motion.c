@@ -155,11 +155,11 @@ __attribute_used__ static inline double
 vesc_read_float4(const uint32_t data, double div)
 {
 	union {
-		uint16_t u;
-		int16_t i;
+		uint32_t u;
+		int32_t i;
 	} u;
 
-	u.u = __bswap_16(data);
+	u.u = __bswap_32(data);
 
 	double f = (double)u.i;
 
