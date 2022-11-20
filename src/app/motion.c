@@ -700,6 +700,40 @@ control_side_lights(bool connected)
 }
 
 static void
+control_headlights(float brightness)
+{
+	static uint8_t br = 255U;
+
+	uint8_t val = (uint8_t)(brightness * 255.0f);
+
+	if (br != val) {
+		struct can_packet_t msg = {
+		    0,
+		};
+
+		msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_MODE;
+		msg.hdr.id = 101U;
+		msg.len = 2U;
+		msg.data[0U] = 0U;
+		msg.data[1U] = (uint8_t)LEDS_MODE_STATIC_COLOR;
+		send_can_msg(&msg);
+
+		msg.data[0U] = 1U;
+		send_can_msg(&msg);
+
+		msg.hdr.cmd = (uint8_t)LIGHT_CAN_PACKET_SET_BRIGHTNESS;
+		msg.data[0U] = 0U;
+		msg.data[1U] = val;
+		send_can_msg(&msg);
+
+		msg.data[0U] = 1U;
+		send_can_msg(&msg);
+
+		br = val;
+	}
+}
+
+static void
 send_lights_sync(uint32_t counter)
 {
 	struct can_packet_t msg = {
@@ -720,6 +754,9 @@ send_lights_sync(uint32_t counter)
 	msg.data[1U] = u.u8[1];
 	msg.data[2U] = u.u8[2];
 	msg.data[3U] = u.u8[3];
+	send_can_msg(&msg);
+
+	msg.hdr.id = 101U;
 	send_can_msg(&msg);
 }
 
@@ -821,12 +858,7 @@ camera_control(struct rc_data_t *rc)
 		servo_tilt = 100.0f;
 	}
 
-	float light_value = (float)(rc->axis[4] - 1500) / 500.0f * 255.0f;
-	if (light_value < 0.0f) {
-		light_value = 0.0f;
-	}
-
-	uint8_t data[5] = {0xA5, (uint8_t)servo_pan, (uint8_t)servo_tilt, (uint8_t)light_value, 0U};
+	uint8_t data[5] = {0xA5, (uint8_t)servo_pan, (uint8_t)servo_tilt, 0U, 0U};
 	data[4] = (uint8_t)(data[0] + data[1] + data[2] + data[3]);
 	ssize_t w = write(servo_fd, data, sizeof(data));
 	(void)w;
@@ -881,6 +913,7 @@ motion_main(void)
 
 		float speed = 0.0f;
 		float steering = 0.0f;
+		float head_brightness = 0.0f;
 
 		uint64_t last_rc_rx = svc_get_monotime();
 		bool rc_connected = false;
@@ -909,6 +942,11 @@ motion_main(void)
 					speed = (float)(r.r->axis[1] - 1500) / 500.0f;
 					steering = (float)(r.r->axis[0] - 1500) / 500.0f;
 
+					head_brightness = (float)(r.r->axis[4] - 1500) / 500.0f;
+					if (head_brightness < 0.0f) {
+						head_brightness = 0.0f;
+					}
+
 					last_rc_rx = mono;
 					rc_connected = true;
 				} else {
@@ -931,6 +969,7 @@ motion_main(void)
 
 			control_side_lights(rc_connected);
 			control_tail_lights(speed);
+			control_headlights(head_brightness);
 			send_lights_sync(l_counter++);
 		}
 	} while (0);
