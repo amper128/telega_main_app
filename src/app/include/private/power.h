@@ -8,6 +8,14 @@
 
 #pragma once
 
+#include <netinet/in.h>
+#include <stdbool.h>
+
+typedef struct {
+	struct sockaddr_in si_other;
+	bool connected;
+} connection_state_t;
+
 int power_init(void);
 
 int power_main(void);

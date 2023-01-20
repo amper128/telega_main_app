@@ -42,6 +42,8 @@ static bool connected = false;
 static uint64_t connect_tm = 0ULL;
 static uint64_t last_keepalive = 0ULL;
 
+static shm_t connect_status_shm;
+
 static void
 power_cmd_read(int sock)
 {
@@ -52,6 +54,8 @@ power_cmd_read(int sock)
 	pwr_sockaddr.sin_port = htons(PORT);
 	pwr_sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	uint64_t mono = svc_get_monotime();
+
+	connection_state_t cstate;
 
 	if (!connected) {
 		if ((mono - connect_tm) >= CONNECT_TMO) {
@@ -136,12 +140,28 @@ power_cmd_read(int sock)
 			break;
 		}
 	} while (true);
+
+	cstate.connected = connected;
+	memcpy(&cstate.si_other, &si_other, sizeof(si_other));
+	shm_map_write(&connect_status_shm, &cstate, sizeof(connection_state_t));
 }
 
 int
 power_init(void)
 {
-	return 0;
+	int result = 1;
+
+	do {
+		shm_map_init("connect_status", sizeof(connection_state_t));
+
+		if (!shm_map_open("connect_status", &connect_status_shm)) {
+			break;
+		}
+
+		result = 0;
+	} while (false);
+
+	return result;
 }
 
 int
