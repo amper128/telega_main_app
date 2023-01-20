@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #define MAXTEMP (6U)
 
 typedef struct {
