@@ -18,6 +18,7 @@
 #include <private/gps.h>
 #include <private/motion.h>
 #include <private/network_status.h>
+#include <private/power.h>
 #include <private/sensors.h>
 #include <private/system_telemetry.h>
 #include <private/telemetry.h>
@@ -27,8 +28,11 @@ static shm_t sensors_shm;
 static shm_t sys_status_shm;
 static shm_t modem_status_shm;
 static shm_t motion_status_shm;
+static shm_t connect_status_shm;
 
-#define SERVER "192.168.50.100"
+/* локальная копия флага наличия подключения */
+static bool m_connected = false;
+
 #define PORT 5011
 
 #define X1E7 (10000000)
@@ -184,6 +188,7 @@ telemetry_main(void)
 	int result = 1;
 
 	do {
+		/* открытие shm */
 		if (!shm_map_open("shm_gps", &gps_shm)) {
 			break;
 		}
@@ -204,7 +209,11 @@ telemetry_main(void)
 			break;
 		}
 
-		/* UDP init */
+		if (!shm_map_open("connect_status", &connect_status_shm)) {
+			break;
+		}
+
+		/* инициализируем UDP сокет */
 		struct sockaddr_in si_other;
 		int s, slen = sizeof(si_other);
 
@@ -217,10 +226,13 @@ telemetry_main(void)
 		si_other.sin_family = AF_INET;
 		si_other.sin_port = htons(PORT);
 
-		if (inet_aton(SERVER, &si_other.sin_addr) == 0) {
+		/* но адрес сокету пока не назначаем */
+		/*if (inet_aton(SERVER, &si_other.sin_addr) == 0) {
 			log_err("inet_aton() failed");
 			break;
-		}
+		}*/
+
+		m_connected = false;
 
 		RC_td_t rc_td;
 		memset((uint8_t *)&rc_td, 0, sizeof(rc_td));
@@ -229,20 +241,40 @@ telemetry_main(void)
 		result = 0;
 
 		while (svc_cycle()) {
-			read_gps_status(&rc_td);
-			read_sensors_status(&rc_td);
-			read_system_status(&rc_td);
-			read_modem_status(&rc_td);
-			read_drives_status(&rc_td);
+			/* читаем статус подключения */
+			connection_state_t *cstate;
+			void *p;
+			shm_map_read(&connect_status_shm, &p);
+			cstate = p;
 
-			rc_td.CRC = crc16((uint8_t *)&rc_td, offsetof(RC_td_t, CRC), 0U);
+			if (cstate->connected != m_connected) {
+				/* изменилось состояние подключения */
+				m_connected = cstate->connected;
 
-			/* UDP send */
-			if (sendto(s, (uint8_t *)&rc_td, sizeof(rc_td), 0,
-				   (struct sockaddr *)&si_other, (socklen_t)slen) == -1) {
-				log_err("cannot send to socket");
-				result = 1;
-				break;
+				if (m_connected) {
+					/* меняем адрес у UDP сокета */
+					memcpy(&si_other.sin_addr, &cstate->sin_addr,
+					       sizeof(si_other.sin_addr));
+				}
+			}
+
+			/* отправляем телеметрию только если есть активное соединение */
+			if (m_connected) {
+				read_gps_status(&rc_td);
+				read_sensors_status(&rc_td);
+				read_system_status(&rc_td);
+				read_modem_status(&rc_td);
+				read_drives_status(&rc_td);
+
+				rc_td.CRC = crc16((uint8_t *)&rc_td, offsetof(RC_td_t, CRC), 0U);
+
+				/* UDP send */
+				if (sendto(s, (uint8_t *)&rc_td, sizeof(rc_td), 0,
+					   (struct sockaddr *)&si_other, (socklen_t)slen) == -1) {
+					log_err("cannot send to socket");
+					result = 1;
+					break;
+				}
 			}
 		}
 	} while (0);
