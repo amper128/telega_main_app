@@ -10,21 +10,52 @@
  *
  */
 
+#include <arpa/inet.h>
 #include <gst/gst.h>
-#include <private/audio.h>
 #include <stdbool.h>
 
+#include <svc/sharedmem.h>
 #include <svc/svc.h>
+
+#include <private/audio.h>
+#include <private/power.h>
 
 #define BITRATE (64000)
 #define FEC_PERCENT (50)
 
+#define UDP_PORT_AUDIO (5610)
+
+static shm_t connect_status_shm;
+/* локальная копия флага наличия подключения */
+static bool m_connected = false;
+static struct in_addr sin_addr; /* IP адрес */
+
 static GMainLoop *main_loop; /* GLib's Main Loop */
+
+static void
+check_connect(void)
+{
+	/* читаем статус подключения */
+	connection_state_t *cstate;
+	void *p;
+	shm_map_read(&connect_status_shm, &p);
+	cstate = p;
+
+	if (cstate->connected != m_connected) {
+		/* изменилось состояние подключения */
+		m_connected = cstate->connected;
+
+		if (m_connected) {
+			/* меняем адрес у UDP сокета */
+			memcpy(&sin_addr, &cstate->sin_addr, sizeof(sin_addr));
+		}
+	}
+}
 
 static gboolean
 g_callback(gpointer data)
 {
-	if (!svc_cycle()) {
+	if (!m_connected || !svc_cycle()) {
 		g_main_loop_quit((GMainLoop *)data);
 	}
 
@@ -65,15 +96,8 @@ gst_handle_message(GstBus *bus, GstMessage *msg, void *user_data)
 	return true;
 }
 
-int
-audio_init(void)
-{
-	/* do nothing */
-	return 0;
-}
-
-int
-audio_main(void)
+static int
+audio_start(void)
 {
 	GstElement *pipeline, *source, *udpsink;
 	GstBus *bus;
@@ -120,11 +144,13 @@ audio_main(void)
 	g_object_set(source, "provide-clock", true, "buffer-time", 1000, "latency-time", 1000,
 		     "do-timestamp", true, NULL);
 
+	/* получаем значение IP адреса в виде строки */
+	char *ip_string = inet_ntoa(sin_addr);
 	g_object_set(encoder, "bitrate", BITRATE, NULL);
 	g_object_set(rtp, "mtu", 1420, "pt", 96, NULL);
 	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
-	g_object_set(udpsink, "host", "192.168.50.100", "port", 5610, "sync", false, "async", false,
-		     NULL);
+	g_object_set(udpsink, "host", ip_string, "port", UDP_PORT_AUDIO, "sync", false, "async",
+		     false, NULL);
 
 	/* Build the pipeline */
 	gst_bin_add_many(GST_BIN(pipeline), source, conv, resample, encoder_q, encoder, parser, rtp,
@@ -152,7 +178,7 @@ audio_main(void)
 	context = g_main_context_new();
 	main_loop = g_main_loop_new(context, FALSE);
 
-	gsource = g_timeout_source_new_seconds(1);
+	gsource = g_timeout_source_new(50);
 	g_source_set_callback(gsource, g_callback, main_loop, NULL);
 	g_source_attach(gsource, context);
 
@@ -165,4 +191,30 @@ audio_main(void)
 	gst_object_unref(pipeline);
 
 	return 0;
+}
+
+int
+audio_init(void)
+{
+	/* do nothing */
+	return 0;
+}
+
+int
+audio_main(void)
+{
+	int result = 0;
+
+	while (svc_cycle()) {
+		check_connect();
+
+		if (m_connected) {
+			result = audio_start();
+			if (result != 0) {
+				break;
+			}
+		}
+	}
+
+	return result;
 }
