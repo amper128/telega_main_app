@@ -205,16 +205,22 @@ audio_main(void)
 {
 	int result = 0;
 
-	while (svc_cycle()) {
-		check_connect();
+	do {
+		if (!shm_map_open("connect_status", &connect_status_shm)) {
+			break;
+		}
 
-		if (m_connected) {
-			result = audio_start();
-			if (result != 0) {
-				break;
+		while (svc_cycle()) {
+			check_connect();
+
+			if (m_connected) {
+				result = audio_start();
+				if (result != 0) {
+					break;
+				}
 			}
 		}
-	}
+	} while (0);
 
 	return result;
 }
