@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdbool.h>
 
 typedef struct {

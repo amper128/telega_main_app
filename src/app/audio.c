@@ -10,7 +10,6 @@
  *
  */
 
-#include <arpa/inet.h>
 #include <gst/gst.h>
 #include <stdbool.h>
 
@@ -55,6 +54,8 @@ check_connect(void)
 static gboolean
 g_callback(gpointer data)
 {
+	check_connect();
+
 	if (!m_connected || !svc_cycle()) {
 		g_main_loop_quit((GMainLoop *)data);
 	}
