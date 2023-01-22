@@ -28,10 +28,13 @@
  */
 
 #include <gst/gst.h>
-#include <private/video.h>
 #include <stdbool.h>
 
+#include <svc/sharedmem.h>
 #include <svc/svc.h>
+
+#include <private/power.h>
+#include <private/video.h>
 
 #define VIDEO_W (1280)
 #define VIDEO_H (720)
@@ -43,13 +46,43 @@
 #define VIDEO_PIP_H (480)
 #define BITRATE_PIP (512000)
 
+#define UDP_PORT_VIDEO (5600)
+#define UDP_PORT_VIDEO_PIP (5601)
+
+static shm_t connect_status_shm;
+/* локальная копия флага наличия подключения */
+static bool m_connected = false;
+static struct in_addr sin_addr; /* IP адрес */
+
 static GMainLoop *main_loop; /* GLib's Main Loop */
 static GMainLoop *pip_loop;  /* GLib's Main Loop */
+
+static void
+check_connect(void)
+{
+	/* читаем статус подключения */
+	connection_state_t *cstate;
+	void *p;
+	shm_map_read(&connect_status_shm, &p);
+	cstate = p;
+
+	if (cstate->connected != m_connected) {
+		/* изменилось состояние подключения */
+		m_connected = cstate->connected;
+
+		if (m_connected) {
+			/* меняем адрес у UDP сокета */
+			memcpy(&sin_addr, &cstate->sin_addr, sizeof(sin_addr));
+		}
+	}
+}
 
 static gboolean
 g_callback(gpointer data)
 {
-	if (!svc_cycle()) {
+	check_connect();
+
+	if (!m_connected || !svc_cycle()) {
 		g_main_loop_quit((GMainLoop *)data);
 	}
 
@@ -90,15 +123,8 @@ gst_handle_message(GstBus *bus, GstMessage *msg, void *user_data)
 	return true;
 }
 
-int
-video_init(void)
-{
-	/* do nothing */
-	return 0;
-}
-
-int
-video_main(void)
+static int
+video_start(void)
 {
 	GstElement *pipeline, *source, *caps, *ratec, *udpsink;
 	GstBus *bus;
@@ -172,6 +198,8 @@ video_main(void)
 	g_object_set(G_OBJECT(ratec), "caps", ratecaps, NULL);
 	gst_caps_unref(ratecaps);
 
+	/* получаем значение IP адреса в виде строки */
+	char *ip_string = inet_ntoa(sin_addr);
 	/* Modify the source's properties */
 	g_object_set(source, "ispdigitalgainrange", "1 2", "wbmode", 1, "ee-mode", 0, NULL);
 	g_object_set(conv, "flip-method", 0, NULL);
@@ -179,8 +207,8 @@ video_main(void)
 		     "control-rate", 0, "maxperf-enable", true, "profile", 2, NULL);
 	g_object_set(rtp, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
 	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
-	g_object_set(udpsink, "host", "192.168.50.100", "port", 5600, "sync", false, "async", false,
-		     NULL);
+	g_object_set(udpsink, "host", ip_string, "port", UDP_PORT_VIDEO, "sync", false, "async",
+		     false, NULL);
 
 	/* Build the pipeline */
 	gst_bin_add_many(GST_BIN(pipeline), source, caps, conv,
@@ -209,7 +237,7 @@ video_main(void)
 	context = g_main_context_new();
 	main_loop = g_main_loop_new(context, FALSE);
 
-	gsource = g_timeout_source_new_seconds(1);
+	gsource = g_timeout_source_new(50);
 	g_source_set_callback(gsource, g_callback, main_loop, NULL);
 	g_source_attach(gsource, context);
 
@@ -224,8 +252,8 @@ video_main(void)
 	return 0;
 }
 
-int
-video_pip_main(void)
+static int
+video_pip_start(void)
 {
 	GstElement *pipeline;
 	GstElement *source, *srccaps;
@@ -329,6 +357,8 @@ video_pip_main(void)
 	g_object_set(G_OBJECT(convcaps), "caps", conv_gst_c, NULL);
 	gst_caps_unref(conv_gst_c);
 
+	/* получаем значение IP адреса в виде строки */
+	char *ip_string = inet_ntoa(sin_addr);
 	/* Modify the source's properties */
 	g_object_set(source, "device", "/dev/video1", "do-timestamp", true, "io-mode", 2, NULL);
 	g_object_set(crop, "top", 128, "left", 160, "right", 160, "bottom", 128, NULL);
@@ -337,8 +367,8 @@ video_pip_main(void)
 		     "control-rate", 0, "maxperf-enable", true, "profile", 2, NULL);
 	g_object_set(rtp, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
 	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
-	g_object_set(udpsink, "host", "192.168.50.100", "port", 5601, "sync", false, "async", false,
-		     NULL);
+	g_object_set(udpsink, "host", ip_string, "port", UDP_PORT_VIDEO_PIP, "sync", false, "async",
+		     false, NULL);
 
 	/* Build the pipeline */
 	gst_bin_add_many(GST_BIN(pipeline), source, srccaps, jpegparse, dec, deccaps, crop, conv,
@@ -366,7 +396,7 @@ video_pip_main(void)
 	context = g_main_context_new();
 	pip_loop = g_main_loop_new(context, FALSE);
 
-	gsource = g_timeout_source_new_seconds(1);
+	gsource = g_timeout_source_new(50);
 	g_source_set_callback(gsource, g_callback, pip_loop, NULL);
 	g_source_attach(gsource, context);
 
@@ -379,4 +409,61 @@ video_pip_main(void)
 	gst_object_unref(pipeline);
 
 	return 0;
+}
+
+int
+video_init(void)
+{
+	/* do nothing */
+	return 0;
+}
+
+int
+video_main(void)
+{
+	int result = 0;
+
+	do {
+		if (!shm_map_open("connect_status", &connect_status_shm)) {
+			break;
+		}
+
+		while (svc_cycle()) {
+			check_connect();
+
+			if (m_connected) {
+				result = video_start();
+				if (result != 0) {
+					break;
+				}
+			}
+		}
+	} while (0);
+
+	return result;
+}
+
+int
+video_pip_main(void)
+{
+	int result = 0;
+
+	do {
+		if (!shm_map_open("connect_status", &connect_status_shm)) {
+			break;
+		}
+
+		while (svc_cycle()) {
+			check_connect();
+
+			if (m_connected) {
+				result = video_pip_start();
+				if (result != 0) {
+					break;
+				}
+			}
+		}
+	} while (0);
+
+	return result;
 }
