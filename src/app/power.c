@@ -142,7 +142,7 @@ power_cmd_read(int sock)
 	} while (true);
 
 	cstate.connected = connected;
-	memcpy(&cstate.si_other, &si_other, sizeof(si_other));
+	memcpy(&cstate.sin_addr, &si_other.sin_addr, sizeof(si_other.sin_addr));
 	shm_map_write(&connect_status_shm, &cstate, sizeof(connection_state_t));
 }
 

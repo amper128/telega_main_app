@@ -12,7 +12,7 @@
 #include <stdbool.h>
 
 typedef struct {
-	struct sockaddr_in si_other;
+	struct in_addr sin_addr; /* IP адрес */
 	bool connected;
 } connection_state_t;
 
