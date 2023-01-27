@@ -141,21 +141,441 @@ gst_handle_message(GstBus *bus, GstMessage *msg, void *user_data)
 	return true;
 }
 
+enum usb_cam_type_t { CAMERA_FRONT, CAMERA_BACK };
+
+struct usb_cam_src_data_t {
+	GstElement *source;
+	GstElement *source_capsfilter;
+	GstStructure *srcstructure;
+	GstElement *jpegparse;
+	GstElement *jpegdec;
+	GstElement *crop;
+	GstElement *vidconv;
+	GstStructure *vidconv_structure;
+	GstCapsFeatures *vidconv_features;
+	GstElement *vidconv_capsfilter;
+};
+
+/* v4l2src device=%s ! image/jpeg,width=%u,height=%u,framerate=30/1 ! \
+ * jpegparse ! jpegdec ! \
+ * videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv flip=%u ! \
+ * 'video/x-raw(memory:NVMM),format=RGBA'
+ */
+
+static int
+make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t ctype,
+			   const char devname[])
+{
+	static const struct {
+		const gchar *srcname;
+		const gchar *capsname;
+		const gchar *jpegparsename;
+		const gchar *jpegdecname;
+		const gchar *cropname;
+		const gchar *vidconvname;
+		const gchar *vidconvcapsname;
+	} names[] = {[CAMERA_FRONT] = {.srcname = "source_front",
+				       .capsname = "capsfilter_front",
+				       .jpegparsename = "jpegparse_front",
+				       .jpegdecname = "jpegdec_front",
+				       .cropname = "videocrop_front",
+				       .vidconvname = "vidconv_front",
+				       .vidconvcapsname = "vidconvcapsfilter_front"},
+		     [CAMERA_BACK] = {.srcname = "source_back",
+				      .capsname = "capsfilter_back",
+				      .jpegparsename = "jpegparse_back",
+				      .jpegdecname = "jpegdec_back",
+				      .cropname = "videocrop_back",
+				      .vidconvname = "vidconv_back",
+				      .vidconvcapsname = "vidconvcapsfilter_back"}};
+
+	cdata->source = gst_element_factory_make("v4l2src", names[ctype].srcname);
+	if (!cdata->source) {
+		g_printerr("Cannot create v4l2src.\n");
+		return -1;
+	}
+
+	cdata->source_capsfilter = gst_element_factory_make("capsfilter", names[ctype].capsname);
+	if (!cdata->source) {
+		g_printerr("Cannot create capsfilter.\n");
+		gst_object_unref(cdata->source);
+		return -1;
+	}
+
+	GstCaps *gstcaps = gst_caps_new_empty();
+	if (!gstcaps) {
+		g_printerr("Cannot create gstcaps.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		return -1;
+	}
+
+	cdata->srcstructure = gst_structure_new("image/jpeg", "framerate", GST_TYPE_FRACTION,
+						VIDEO_FPS, 1, "width", G_TYPE_INT, VIDEO_PIP_CAP_W,
+						"height", G_TYPE_INT, VIDEO_PIP_CAP_H, NULL);
+	if (!cdata->srcstructure) {
+		g_printerr("Cannot create srcstructure.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		return -1;
+	}
+
+	cdata->jpegparse = gst_element_factory_make("jpegparse", names[ctype].jpegparsename);
+	if (!cdata->jpegparse) {
+		g_printerr("Cannot create jpegparse.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(cdata->srcstructure);
+		return -1;
+	}
+
+	cdata->jpegdec = gst_element_factory_make("jpegdec", names[ctype].jpegdecname);
+	if (!cdata->jpegdec) {
+		g_printerr("Cannot create jpegdec.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(cdata->srcstructure);
+		gst_object_unref(cdata->jpegparse);
+		return -1;
+	}
+
+	cdata->crop = gst_element_factory_make("videocrop", names[ctype].cropname);
+	if (!cdata->crop) {
+		g_printerr("Cannot create videocrop.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(cdata->srcstructure);
+		gst_object_unref(cdata->jpegparse);
+		gst_object_unref(cdata->jpegdec);
+		return -1;
+	}
+
+	cdata->vidconv = gst_element_factory_make("nvvidconv", names[ctype].vidconvname);
+	if (!cdata->vidconv) {
+		g_printerr("Cannot create nvvidconv.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(cdata->srcstructure);
+		gst_object_unref(cdata->jpegparse);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->crop);
+		return -1;
+	}
+
+	/*cdata->vidconv_structure = gst_structure_new(
+	    "video/x-raw", "framerate", GST_TYPE_FRACTION, VIDEO_FPS, 1, "format", G_TYPE_STRING,
+	    "RGBA", "width", G_TYPE_INT, VIDEO_PIP_W, "height", G_TYPE_INT, VIDEO_PIP_H, NULL);*/
+	cdata->vidconv_structure =
+	    gst_structure_new("video/x-raw", "format", G_TYPE_STRING, "RGBA", NULL);
+	if (!cdata->vidconv_structure) {
+		g_printerr("Cannot create vidconv_structure.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(cdata->srcstructure);
+		gst_object_unref(cdata->jpegparse);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->crop);
+		gst_object_unref(cdata->vidconv);
+	}
+
+	cdata->vidconv_features = gst_caps_features_new("memory:NVMM", NULL);
+	if (!cdata->vidconv_features) {
+		g_printerr("Cannot create vidconv_features.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(cdata->srcstructure);
+		gst_object_unref(cdata->jpegparse);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->crop);
+		gst_object_unref(cdata->vidconv);
+		gst_structure_free(cdata->vidconv_structure);
+	}
+
+	cdata->vidconv_capsfilter =
+	    gst_element_factory_make("capsfilter", names[ctype].vidconvcapsname);
+	if (!cdata->vidconv_capsfilter) {
+		g_printerr("Cannot create vidconv_capsfilter.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(cdata->srcstructure);
+		gst_object_unref(cdata->jpegparse);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->crop);
+		gst_object_unref(cdata->vidconv);
+		gst_structure_free(cdata->vidconv_structure);
+		gst_caps_features_free(cdata->vidconv_features);
+		return -1;
+	}
+
+	/* set 'device=%s' to v4l2src */
+	g_object_set(cdata->source, "device", devname, NULL);
+
+	/* add 'image/jpeg,width=%u,height=%u,framerate=30/1' to v4l2src */
+	gst_caps_append_structure(gstcaps, cdata->srcstructure);
+	g_object_set(G_OBJECT(cdata->source_capsfilter), "caps", gstcaps, NULL);
+	gst_caps_unref(gstcaps);
+
+	/* set videocrop params */
+	g_object_set(cdata->crop, "top", 0, NULL);
+	g_object_set(cdata->crop, "left", 96, NULL);
+	g_object_set(cdata->crop, "right", 96, NULL);
+	g_object_set(cdata->crop, "bottom", 0, NULL);
+
+	/* set flipmode in vidconv */
+	int32_t flipmode = 0;
+	if (ctype == CAMERA_BACK) {
+		/* horizontal mirror */
+		flipmode = 4;
+	}
+	g_object_set(cdata->vidconv, "flip-method", flipmode, NULL);
+
+	/* add 'memory:NVMM' to 'video/x-raw' */
+	gst_caps_append_structure_full(gstcaps, cdata->vidconv_structure, cdata->vidconv_features);
+
+	/* apply 'video/x-raw' caps */
+	g_object_set(cdata->vidconv_capsfilter, "caps", gstcaps, NULL);
+
+	/* cleanup */
+	gst_caps_unref(gstcaps);
+
+	return 0;
+}
+
+struct compositor_data_t {
+	GstElement *nvcompositor;
+	GstElement *nvvidconv;
+	GstElement *nvvidconv_caps;
+	GstStructure *convstructure;
+};
+
+/*
+ * nvcompositor name=comp \
+ *	sink_0::xpos=0 sink_0::ypos=0 sink_0::width=480 sink_0::height=360  \
+ *	sink_1::xpos=480 sink_1::ypos=0 sink_1::width=480 sink_1::height=360 ! \
+ *	nvvidconv ! 'video/x-raw(memory:NVMM),format=NV12'
+ */
+static int
+make_compositor_stream(struct compositor_data_t *cdata)
+{
+	cdata->nvcompositor = gst_element_factory_make("nvcompositor", "compositor");
+	if (!cdata->nvcompositor) {
+		g_printerr("Cannot create nvcompositor.\n");
+		return -1;
+	}
+
+	cdata->nvvidconv = gst_element_factory_make("nvvidconv", "compositor_vidconv");
+	if (!cdata->nvvidconv) {
+		g_printerr("Cannot create compositor_vidconv.\n");
+		gst_object_unref(cdata->nvcompositor);
+		return -1;
+	}
+
+	cdata->nvvidconv_caps = gst_element_factory_make("capsfilter", "compositor_capsfilter");
+	if (!cdata->nvvidconv) {
+		g_printerr("Cannot create compositor_capsfilter.\n");
+		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvvidconv);
+		return -1;
+	}
+
+	GstCaps *filtercaps = gst_caps_new_empty();
+	if (!filtercaps) {
+		g_printerr("Cannot create compositor_capsfilter.\n");
+		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvvidconv);
+		gst_object_unref(cdata->nvvidconv_caps);
+		return -1;
+	}
+
+	cdata->convstructure =
+	    gst_structure_new("video/x-raw", "format", G_TYPE_STRING, "NV12", NULL);
+	if (!cdata->convstructure) {
+		g_printerr("Unable to create caps.\n");
+		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvvidconv);
+		gst_object_unref(cdata->nvvidconv_caps);
+		gst_caps_unref(filtercaps);
+		return -1;
+	}
+
+	GstCapsFeatures *feat_comp = gst_caps_features_new("memory:NVMM", NULL);
+	if (!feat_comp) {
+		g_printerr("Unable to create feature.\n");
+		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvvidconv);
+		gst_object_unref(cdata->nvvidconv_caps);
+		gst_caps_unref(filtercaps);
+		gst_structure_free(cdata->convstructure);
+		return -1;
+	}
+	gst_caps_append_structure_full(filtercaps, cdata->convstructure, feat_comp);
+
+	g_object_set(G_OBJECT(cdata->nvvidconv_caps), "caps", filtercaps, NULL);
+
+	/* cleanup */
+	gst_caps_unref(filtercaps);
+	// gst_structure_free(cdata->convstructure);
+
+	return 0;
+}
+
+enum encoder_type_t { ENCODER_H264, ENCODER_H265 };
+
+struct encoder_data_t {
+	GstElement *encoder;
+	GstElement *parser;
+	GstElement *rtppay;
+	GstElement *rtpfec;
+};
+
+/*
+ * nvv4l2h264enc bitrate=%u iframeinterval=60 preset-level=1 ! \
+ * h264parse ! rtph264pay config-interval=1 mtu=1420 pt=96 ! \
+ * rtpulpfecenc percentage=%u pt=122
+ */
+static int
+make_encoder(struct encoder_data_t *edata, enum encoder_type_t etype, uint32_t bitrate,
+	     uint32_t fecpercentage)
+{
+	switch (etype) {
+	case ENCODER_H265:
+		edata->encoder = gst_element_factory_make("nvv4l2h265enc", "h265encoder");
+		break;
+	case ENCODER_H264:
+	default:
+		edata->encoder = gst_element_factory_make("nvv4l2h264enc", "h264encoder");
+		break;
+	}
+
+	if (!edata->encoder) {
+		g_printerr("Cannot create encoder.\n");
+		return -1;
+	}
+
+	switch (etype) {
+	case ENCODER_H265:
+		edata->parser = gst_element_factory_make("h265parse", "h265parser");
+		break;
+	case ENCODER_H264:
+	default:
+		edata->parser = gst_element_factory_make("h264parse", "h264parser");
+		break;
+	}
+
+	if (!edata->parser) {
+		g_printerr("Cannot create parser.\n");
+		gst_object_unref(edata->encoder);
+		return -1;
+	}
+
+	switch (etype) {
+	case ENCODER_H265:
+		edata->rtppay = gst_element_factory_make("rtph265pay", "rtppay");
+		break;
+	case ENCODER_H264:
+	default:
+		edata->rtppay = gst_element_factory_make("rtph264pay", "rtppay");
+		break;
+	}
+
+	if (!edata->rtppay) {
+		g_printerr("Cannot create rtppay.\n");
+		gst_object_unref(edata->encoder);
+		gst_object_unref(edata->parser);
+		return -1;
+	}
+
+	edata->rtpfec = gst_element_factory_make("rtpulpfecenc", "rtpfec");
+	if (!edata->rtpfec) {
+		g_printerr("Cannot create rtppay.\n");
+		gst_object_unref(edata->encoder);
+		gst_object_unref(edata->parser);
+		gst_object_unref(edata->rtppay);
+		return -1;
+	}
+
+	g_object_set(edata->encoder, "bitrate", bitrate, "iframeinterval", 60, "preset-level", 3,
+		     "control-rate", 0, "maxperf-enable", true, "profile", 2, NULL);
+
+	g_object_set(edata->rtppay, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
+
+	g_object_set(edata->rtpfec, "percentage", fecpercentage, "pt", 122, NULL);
+
+	return 0;
+}
+
+struct udpsink_data_t {
+	GstElement *udpsink;
+};
+
+/*
+ * udpsink host=%s port=%u sync=false async=false
+ */
+static int
+make_udp_sink(struct udpsink_data_t *udata, uint32_t udp_port)
+{
+	udata->udpsink = gst_element_factory_make("udpsink", "destination");
+	if (!udata->udpsink) {
+		g_printerr("Cannot create udpsink.\n");
+		return -1;
+	}
+
+	/* получаем значение IP адреса в виде строки */
+	/* указатель на буфер переиспользуется потом, удалять не надо */
+	char *ip_string = inet_ntoa(sin_addr);
+
+	g_object_set(udata->udpsink, "host", ip_string, NULL);
+	g_object_set(udata->udpsink, "port", udp_port, NULL);
+	g_object_set(udata->udpsink, "sync", false, NULL);
+	g_object_set(udata->udpsink, "async", false, NULL);
+
+	return 0;
+}
+
+static int
+connect_to_compositor(GstElement *element, struct compositor_data_t *compositor, uint32_t xpos)
+{
+	GstPad *srcpad = gst_element_get_static_pad(element, "src");
+	GstPadTemplate *sink_pad_template = gst_element_class_get_pad_template(
+	    GST_ELEMENT_GET_CLASS(compositor->nvcompositor), "sink_%u");
+	GstPad *sinkpad =
+	    gst_element_request_pad(compositor->nvcompositor, sink_pad_template, NULL, NULL);
+
+	if (gst_pad_link(srcpad, sinkpad) != GST_PAD_LINK_OK) {
+		g_printerr("source and sink pads could not be linked.\n");
+		return -1;
+	}
+	g_object_set(sinkpad, "xpos", xpos, NULL);
+	g_object_set(sinkpad, "ypos", 0, NULL);
+	g_object_set(sinkpad, "width", VIDEO_PIP_W, NULL);
+	g_object_set(sinkpad, "height", VIDEO_PIP_H, NULL);
+
+	return 0;
+}
+
 static int
 video_start(void)
 {
-	GstElement *pipeline, *source, *caps, *ratec, *udpsink;
+	GstElement *pipeline, *source, *caps, *ratec;
 	GstBus *bus;
 	GstCaps *filtercaps, *ratecaps;
 	GstStructure *srcstructure;
 	GstCapsFeatures *feat;
-	GstElement *conv, *encoder_q, *rate;
-	GstElement *encoder;
-	GstElement *parser;
-	GstElement *rtp, *rtpfec;
+	GstElement *conv, *rate;
 	GstStateChangeReturn ret;
 	GMainContext *context = NULL;
 	GSource *gsource = NULL;
+
+	struct encoder_data_t edata;
+	struct udpsink_data_t sink;
 
 	/* Initialize GStreamer */
 	gst_init(NULL, NULL);
@@ -163,20 +583,20 @@ video_start(void)
 	/* Create the elements */
 	source = gst_element_factory_make("nvarguscamerasrc", "source");
 	conv = gst_element_factory_make("nvvidconv", "vidconv");
-	encoder_q = gst_element_factory_make("queue", "encoderq");
 	rate = gst_element_factory_make("videorate", "videorate");
-	// encoder		= gst_element_factory_make ("omxh264enc" , "h264encoder");
-	encoder = gst_element_factory_make("nvv4l2h264enc", "h264encoder");
-	parser = gst_element_factory_make("h264parse", "parser-h264");
-	rtp = gst_element_factory_make("rtph264pay", "rtp");
-	rtpfec = gst_element_factory_make("rtpulpfecenc", "rtpfec");
-	udpsink = gst_element_factory_make("udpsink", "destination");
+
+	if (make_encoder(&edata, ENCODER_H264, BITRATE, FEC_PERCENT) != 0) {
+		return -1;
+	}
+
+	if (make_udp_sink(&sink, UDP_PORT_VIDEO) != 0) {
+		return -1;
+	}
 
 	/* Create the empty pipeline */
 	pipeline = gst_pipeline_new("test-pipeline");
 
-	if (!pipeline || !source || !udpsink || !conv || !encoder_q || !rate || !encoder ||
-	    !parser || !rtp || !rtpfec) {
+	if (!pipeline || !source || !conv || !rate) {
 		g_printerr("Not all elements could be created.\n");
 		return -1;
 	}
@@ -216,24 +636,17 @@ video_start(void)
 	g_object_set(G_OBJECT(ratec), "caps", ratecaps, NULL);
 	gst_caps_unref(ratecaps);
 
-	/* получаем значение IP адреса в виде строки */
-	char *ip_string = inet_ntoa(sin_addr);
 	/* Modify the source's properties */
 	g_object_set(source, "ispdigitalgainrange", "1 2", "wbmode", 1, "ee-mode", 0, NULL);
 	g_object_set(conv, "flip-method", 0, NULL);
-	g_object_set(encoder, "bitrate", BITRATE, "iframeinterval", 60, "preset-level", 3,
-		     "control-rate", 0, "maxperf-enable", true, "profile", 2, NULL);
-	g_object_set(rtp, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
-	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
-	g_object_set(udpsink, "host", ip_string, "port", UDP_PORT_VIDEO, "sync", false, "async",
-		     false, NULL);
 
 	/* Build the pipeline */
 	gst_bin_add_many(GST_BIN(pipeline), source, caps, conv,
-			 /*encoder_q, */ /*rate, ratec,*/ encoder, parser, rtp, rtpfec, udpsink,
-			 NULL);
-	if (gst_element_link_many(source, caps, conv, /*encoder_q,*/ /* rate, ratec,*/ encoder,
-				  parser, rtp, rtpfec, udpsink, NULL) != TRUE) {
+			 /*rate, ratec,*/ edata.encoder, edata.parser, edata.rtppay, edata.rtpfec,
+			 sink.udpsink, NULL);
+	if (gst_element_link_many(source, caps, conv,
+				  /* rate, ratec,*/ edata.encoder, edata.parser, edata.rtppay,
+				  edata.rtpfec, sink.udpsink, NULL) != TRUE) {
 		g_printerr("Elements could not be linked.\n");
 		gst_object_unref(pipeline);
 		return -1;
@@ -274,26 +687,14 @@ static int
 video_pip_start(void)
 {
 	GstElement *pipeline;
-	GstElement *source1, *srccaps1;
-	GstElement *source2, *srccaps2;
-	GstCaps *src_gst_c;
-	GstStructure *srcstructure;
-	GstElement *jpegparse1, *jpegparse2, *dec1, *dec2;
-	GstElement *nvcompositor;
-	GstElement *crop1, *crop2;
-	GstElement *conv1, *conv2, *convcaps1, *convcaps2;
-	GstElement *conv_comp, *convcaps_comp;
-	GstCaps *conv_gst_c1, *conv_gst_c2;
-	GstElement *encoder;
-	GstElement *parser;
-	GstElement *rtp, *rtpfec;
-	GstElement *udpsink;
+
+	struct usb_cam_src_data_t cam_front;
+	struct usb_cam_src_data_t cam_back;
+	struct compositor_data_t compositor;
+	struct encoder_data_t pip_encoder;
+	struct udpsink_data_t udpsink;
 
 	GstBus *bus;
-
-	GstStructure *convstructure1, *convstructure2;
-	GstCapsFeatures *convfeat1, *convfeat2;
-	GstElement *encoder_q;
 	GstStateChangeReturn ret;
 	GMainContext *context = NULL;
 	GSource *gsource = NULL;
@@ -301,203 +702,78 @@ video_pip_start(void)
 	/* Initialize GStreamer */
 	gst_init(NULL, NULL);
 
-	/* Create the elements */
-	source1 = gst_element_factory_make("v4l2src", "source1");
-	source2 = gst_element_factory_make("v4l2src", "source2");
-	jpegparse1 = gst_element_factory_make("jpegparse", "jpegparse1");
-	jpegparse2 = gst_element_factory_make("jpegparse", "jpegparse2");
-	dec1 = gst_element_factory_make("jpegdec", "decoder1");
-	dec2 = gst_element_factory_make("jpegdec", "decoder2");
-	crop1 = gst_element_factory_make("videocrop", "videocrop1");
-	crop2 = gst_element_factory_make("videocrop", "videocrop2");
-	conv1 = gst_element_factory_make("nvvidconv", "vidconv1");
-	conv2 = gst_element_factory_make("nvvidconv", "vidconv2");
-	conv_comp = gst_element_factory_make("nvvidconv", "vidconv_comp");
+	if (make_compositor_stream(&compositor) != 0) {
+		return -1;
+	}
 
-	nvcompositor = gst_element_factory_make("nvcompositor", "compositor");
+	if (make_udp_sink(&udpsink, UDP_PORT_VIDEO_PIP) != 0) {
+		return -1;
+	}
 
-	encoder_q = gst_element_factory_make("queue", "encoderq");
-	encoder = gst_element_factory_make("nvv4l2h264enc", "h264encoder");
-	parser = gst_element_factory_make("h264parse", "parser-h264");
-	rtp = gst_element_factory_make("rtph264pay", "rtp");
-	rtpfec = gst_element_factory_make("rtpulpfecenc", "rtpfec");
-	udpsink = gst_element_factory_make("udpsink", "destination");
+	if (make_encoder(&pip_encoder, ENCODER_H264, BITRATE_PIP, FEC_PERCENT) != 0) {
+		return -1;
+	}
+
+	if (make_usb_cam_source_stream(&cam_front, CAMERA_FRONT, "/dev/video2") != 0) {
+		return -1;
+	}
+
+	if (make_usb_cam_source_stream(&cam_back, CAMERA_BACK, "/dev/video1") != 0) {
+		return -1;
+	}
 
 	/* Create the empty pipeline */
 	pipeline = gst_pipeline_new("pip-pipeline");
 
-	if (!pipeline || !source1 || !source2 || !jpegparse1 || !jpegparse2 || !dec1 || !dec2 ||
-	    !crop1 || !crop2 || !udpsink || !conv1 || !conv2 || !nvcompositor || !conv_comp ||
-	    !encoder_q || !encoder || !parser || !rtp || !rtpfec) {
+	if (!pipeline) {
 		g_printerr("Not all elements could be created.\n");
 		return -1;
 	}
 
-	/* v4l2src caps */
-	srccaps1 = gst_element_factory_make("capsfilter", "srcfilter1");
-	srccaps2 = gst_element_factory_make("capsfilter", "srcfilter2");
-	g_assert(srccaps1 != NULL); /* should always exist */
-	g_assert(srccaps2 != NULL); /* should always exist */
-
-	src_gst_c = gst_caps_new_empty();
-
-	srcstructure = gst_structure_new("image/jpeg", "framerate", GST_TYPE_FRACTION, VIDEO_FPS, 1,
-					 "width", G_TYPE_INT, VIDEO_PIP_CAP_W, "height", G_TYPE_INT,
-					 VIDEO_PIP_CAP_H, NULL);
-	if (!srcstructure) {
-		g_printerr("Unable to create src caps.\n");
-		gst_object_unref(pipeline);
-		return -1;
-	}
-
-	gst_caps_append_structure(src_gst_c, srcstructure);
-
-	g_object_set(G_OBJECT(srccaps1), "caps", src_gst_c, NULL);
-	g_object_set(G_OBJECT(srccaps2), "caps", src_gst_c, NULL);
-	gst_caps_unref(src_gst_c);
-
-	/* nvvidconv caps */
-	convcaps1 = gst_element_factory_make("capsfilter", "conv_filter1");
-	convcaps2 = gst_element_factory_make("capsfilter", "conv_filter2");
-	g_assert(convcaps1 != NULL); /* should always exist */
-	g_assert(convcaps2 != NULL); /* should always exist */
-
-	conv_gst_c1 = gst_caps_new_empty();
-	conv_gst_c2 = gst_caps_new_empty();
-
-	convstructure1 = gst_structure_new("video/x-raw", "framerate", GST_TYPE_FRACTION, VIDEO_FPS,
-					   1, "format", G_TYPE_STRING, "RGBA", "width", G_TYPE_INT,
-					   VIDEO_PIP_W, "height", G_TYPE_INT, VIDEO_PIP_H, NULL);
-	convstructure2 = gst_structure_copy(convstructure1);
-
-	if (!convstructure1 || !convstructure2) {
-		g_printerr("Unable to create conv caps.\n");
-		gst_object_unref(pipeline);
-		return -1;
-	}
-
-	convfeat1 = gst_caps_features_new("memory:NVMM", NULL);
-	convfeat2 = gst_caps_features_copy(convfeat1);
-	if (!convfeat1 || !convfeat2) {
-		g_printerr("Unable to create conv feature.\n");
-		gst_object_unref(pipeline);
-		gst_object_unref(convstructure1);
-		gst_object_unref(convstructure2);
-		return -1;
-	}
-
-	gst_caps_append_structure_full(conv_gst_c1, convstructure1, convfeat1);
-	gst_caps_append_structure_full(conv_gst_c2, convstructure2, convfeat2);
-
-	g_object_set(G_OBJECT(convcaps1), "caps", conv_gst_c1, NULL);
-	g_object_set(G_OBJECT(convcaps2), "caps", conv_gst_c2, NULL);
-	gst_caps_unref(conv_gst_c1);
-	gst_caps_unref(conv_gst_c2);
-
-	/* videoconvert after compositor */
-	convcaps_comp = gst_element_factory_make("capsfilter", "comp_filter");
-	g_assert(convcaps_comp != NULL); /* should always exist */
-	GstStructure *convstructure_comp;
-	GstCaps *filtercaps_comp = gst_caps_new_empty();
-	convstructure_comp =
-	    gst_structure_new("video/x-raw", "format", G_TYPE_STRING, "NV12", NULL);
-	if (!convstructure_comp) {
-		g_printerr("Unable to create caps.\n");
-		gst_object_unref(pipeline);
-		gst_caps_unref(filtercaps_comp);
-		return -1;
-	}
-
-	GstCapsFeatures *feat_comp = gst_caps_features_new("memory:NVMM", NULL);
-	if (!feat_comp) {
-		g_printerr("Unable to create feature.\n");
-		gst_object_unref(pipeline);
-		gst_caps_unref(filtercaps_comp);
-		gst_object_unref(convstructure_comp);
-		return -1;
-	}
-	gst_caps_append_structure_full(filtercaps_comp, convstructure_comp, feat_comp);
-
-	g_object_set(G_OBJECT(convcaps_comp), "caps", filtercaps_comp, NULL);
-	gst_caps_unref(filtercaps_comp);
-
-	/* получаем значение IP адреса в виде строки */
-	char *ip_string = inet_ntoa(sin_addr);
-	/* Modify the source's properties */
-	g_object_set(source1, "device", "/dev/video1", NULL);
-	g_object_set(source2, "device", "/dev/video2", NULL);
-	g_object_set(crop1, "top", 0, "left", 96, "right", 96, "bottom", 0, NULL);
-	g_object_set(crop2, "top", 0, "left", 96, "right", 96, "bottom", 0, NULL);
-	g_object_set(conv1, "flip-method", 4, NULL);
-	g_object_set(conv2, "flip-method", 0, NULL);
-	g_object_set(encoder, "bitrate", BITRATE_PIP, "iframeinterval", 60, "preset-level", 3,
-		     "control-rate", 0, "maxperf-enable", true, "profile", 2, NULL);
-	g_object_set(rtp, "config-interval", 1, "mtu", 1420, "pt", 96, NULL);
-	g_object_set(rtpfec, "percentage", FEC_PERCENT, "pt", 122, NULL);
-	g_object_set(udpsink, "host", ip_string, "port", UDP_PORT_VIDEO_PIP, "sync", false, "async",
-		     false, NULL);
-
 	/* Build the pipeline */
-	gst_bin_add_many(GST_BIN(pipeline), source1, srccaps1, jpegparse1, dec1, crop1, conv1,
-			 convcaps1, NULL);
-	gst_bin_add_many(GST_BIN(pipeline), source2, srccaps2, jpegparse2, dec2, crop2, conv2,
-			 convcaps2, NULL);
-	gst_bin_add_many(GST_BIN(pipeline), nvcompositor, conv_comp, convcaps_comp, encoder, parser,
-			 rtp, rtpfec, udpsink, NULL);
+	gst_bin_add_many(GST_BIN(pipeline), cam_front.source, cam_front.source_capsfilter,
+			 cam_front.jpegparse, cam_front.jpegdec, cam_front.crop, cam_front.vidconv,
+			 cam_front.vidconv_capsfilter, NULL);
+	gst_bin_add_many(GST_BIN(pipeline), cam_back.source, cam_back.source_capsfilter,
+			 cam_back.jpegparse, cam_back.jpegdec, cam_back.crop, cam_back.vidconv,
+			 cam_back.vidconv_capsfilter, NULL);
+	gst_bin_add_many(GST_BIN(pipeline), compositor.nvcompositor, compositor.nvvidconv,
+			 compositor.nvvidconv_caps, pip_encoder.encoder, pip_encoder.parser,
+			 pip_encoder.rtppay, pip_encoder.rtpfec, udpsink.udpsink, NULL);
 
 	/* linking source1 */
-	if (gst_element_link_many(source1, srccaps1, jpegparse1, dec1, crop1, conv1, convcaps1,
-				  NULL) != TRUE) {
+	if (gst_element_link_many(cam_front.source, cam_front.source_capsfilter,
+				  cam_front.jpegparse, cam_front.jpegdec, cam_front.crop,
+				  cam_front.vidconv, cam_front.vidconv_capsfilter, NULL) != TRUE) {
 		g_printerr("source1 could not be linked to conv1.\n");
 		gst_object_unref(pipeline);
 		return -1;
 	}
 
 	/* linking source2 */
-	if (gst_element_link_many(source2, srccaps2, jpegparse2, dec2, crop2, conv2, convcaps2,
-				  NULL) != TRUE) {
+	if (gst_element_link_many(cam_back.source, cam_back.source_capsfilter, cam_back.jpegparse,
+				  cam_back.jpegdec, cam_back.crop, cam_back.vidconv,
+				  cam_back.vidconv_capsfilter, NULL) != TRUE) {
 		g_printerr("source2 could not be linked to conv2.\n");
 		gst_object_unref(pipeline);
 		return -1;
 	}
 
 	/* linking compositor with sink */
-	if (gst_element_link_many(nvcompositor, conv_comp, convcaps_comp, encoder, parser, rtp,
-				  rtpfec, udpsink, NULL) != TRUE) {
+	if (gst_element_link_many(compositor.nvcompositor, compositor.nvvidconv,
+				  compositor.nvvidconv_caps, pip_encoder.encoder,
+				  pip_encoder.parser, pip_encoder.rtppay, pip_encoder.rtpfec,
+				  udpsink.udpsink, NULL) != TRUE) {
 		g_printerr("Compositor could not be linked to sink.\n");
 		gst_object_unref(pipeline);
 		return -1;
 	}
 
 	/* connect source1 to compositor */
-	GstPad *srcpad1 = gst_element_get_static_pad(convcaps1, "src");
-	GstPadTemplate *sink_pad_template1 =
-	    gst_element_class_get_pad_template(GST_ELEMENT_GET_CLASS(nvcompositor), "sink_%u");
-	GstPad *sinkpad1 = gst_element_request_pad(nvcompositor, sink_pad_template1, NULL, NULL);
-
-	if (gst_pad_link(srcpad1, sinkpad1) != GST_PAD_LINK_OK) {
-		g_printerr("source1 and sink pads could not be linked.\n");
-		return -1;
-	}
-	g_object_set(sinkpad1, "xpos", 0, NULL);
-	g_object_set(sinkpad1, "ypos", 0, NULL);
-	g_object_set(sinkpad1, "width", VIDEO_PIP_W, NULL);
-	g_object_set(sinkpad1, "height", VIDEO_PIP_H, NULL);
+	connect_to_compositor(cam_front.vidconv_capsfilter, &compositor, 0);
 
 	/* connect source2 to compositor */
-	GstPad *srcpad2 = gst_element_get_static_pad(convcaps2, "src");
-	GstPadTemplate *sink_pad_template2 =
-	    gst_element_class_get_pad_template(GST_ELEMENT_GET_CLASS(nvcompositor), "sink_%u");
-	GstPad *sinkpad2 = gst_element_request_pad(nvcompositor, sink_pad_template2, NULL, NULL);
-
-	if (gst_pad_link(srcpad2, sinkpad2) != GST_PAD_LINK_OK) {
-		g_printerr("source2 and sink pads could not be linked.\n");
-		return -1;
-	}
-	g_object_set(sinkpad2, "xpos", VIDEO_PIP_W, NULL);
-	g_object_set(sinkpad2, "ypos", 0, NULL);
-	g_object_set(sinkpad2, "width", VIDEO_PIP_W, NULL);
-	g_object_set(sinkpad2, "height", VIDEO_PIP_H, NULL);
+	connect_to_compositor(cam_back.vidconv_capsfilter, &compositor, VIDEO_PIP_W);
 
 	/* Start playing */
 	ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
