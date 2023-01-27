@@ -107,9 +107,9 @@ start_microservices(void)
 		{"motion", motion_init, motion_main, 50ULL * TIME_MS},
 		{"sys_stat", system_telemetry_init, system_telemetry_main, 1ULL * TIME_S},
 		{"telemetry", telemetry_init, telemetry_main, 100ULL * TIME_MS},
-		{"video", video_init, video_main, 0ULL},
-		{"video_pip", video_init, video_pip_main, 0ULL},
-		{"audio", audio_init, audio_main, 0ULL},
+		{"video", video_init, video_main, 10ULL * TIME_MS},
+		{"video_pip", video_init, video_pip_main, 10ULL * TIME_MS},
+		{"audio", audio_init, audio_main, 10ULL * TIME_MS},
 		{"netinfo", network_status_init, network_status_main, 1ULL * TIME_S},
 	    },
 	    9U};
