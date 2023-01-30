@@ -66,7 +66,7 @@ typedef struct {
 	struct {
 		int32_t rpm;
 		int16_t current_X10;
-		int16_t duty_X100;
+		int16_t duty_X10;
 		int16_t temp_fet_X10;
 		int16_t temp_motor_X10;
 		int16_t __reserved[2U];
