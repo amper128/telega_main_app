@@ -26,6 +26,7 @@
  *	nvcompositor name=comp \
  *	sink_0::xpos=0 sink_0::ypos=0 sink_0::width=480 sink_0::height=360  \
  *	sink_1::xpos=480 sink_1::ypos=0 sink_1::width=480 sink_1::height=360 ! \
+ *	'video/x-raw(memory:NVMM),format=RGBA' ! \
  *	nvvidconv ! 'video/x-raw(memory:NVMM),format=I420' ! \
  *	nvv4l2h264enc bitrate=512000 iframeinterval=60 preset-level=1 ! \
  *	h264parse ! rtph264pay config-interval=1 mtu=1420 pt=96 ! \
@@ -369,6 +370,8 @@ cleanup_usb_cam_source_stream(struct usb_cam_src_data_t *cdata)
 
 struct compositor_data_t {
 	GstElement *nvcompositor;
+	GstElement *nvcompositor_caps;
+	GstStructure *compstructure;
 	GstElement *nvvidconv;
 	GstElement *nvvidconv_caps;
 	GstStructure *convstructure;
@@ -378,6 +381,7 @@ struct compositor_data_t {
  * nvcompositor name=comp \
  *	sink_0::xpos=0 sink_0::ypos=0 sink_0::width=480 sink_0::height=360  \
  *	sink_1::xpos=480 sink_1::ypos=0 sink_1::width=480 sink_1::height=360 ! \
+ *	'video/x-raw(memory:NVMM),format=RGBA' ! \
  *	nvvidconv ! 'video/x-raw(memory:NVMM),format=NV12'
  */
 static int
@@ -389,25 +393,72 @@ make_compositor_stream(struct compositor_data_t *cdata)
 		return -1;
 	}
 
+	cdata->nvcompositor_caps =
+	    gst_element_factory_make("capsfilter", "compositor_compcapsfilter");
+	if (!cdata->nvcompositor_caps) {
+		g_printerr("Cannot create compositor_compcapsfilter.\n");
+		gst_object_unref(cdata->nvcompositor);
+		return -1;
+	}
+
+	GstCaps *comp_filtercaps = gst_caps_new_empty();
+	if (!comp_filtercaps) {
+		g_printerr("Cannot create compositor_convcapsfilter.\n");
+		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		return -1;
+	}
+
+	cdata->compstructure =
+	    gst_structure_new("video/x-raw", "format", G_TYPE_STRING, "RGBA", NULL);
+	if (!cdata->compstructure) {
+		g_printerr("Unable to create compositor caps.\n");
+		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		gst_caps_unref(comp_filtercaps);
+		return -1;
+	}
+
+	GstCapsFeatures *feat_comp = gst_caps_features_new("memory:NVMM", NULL);
+	if (!feat_comp) {
+		g_printerr("Unable to create compositor feature.\n");
+		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		gst_caps_unref(comp_filtercaps);
+		gst_structure_free(cdata->compstructure);
+	}
+
 	cdata->nvvidconv = gst_element_factory_make("nvvidconv", "compositor_vidconv");
 	if (!cdata->nvvidconv) {
 		g_printerr("Cannot create compositor_vidconv.\n");
 		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		gst_caps_unref(comp_filtercaps);
+		gst_structure_free(cdata->compstructure);
+		gst_caps_features_free(feat_comp);
 		return -1;
 	}
 
-	cdata->nvvidconv_caps = gst_element_factory_make("capsfilter", "compositor_capsfilter");
+	cdata->nvvidconv_caps = gst_element_factory_make("capsfilter", "compositor_convcapsfilter");
 	if (!cdata->nvvidconv) {
 		g_printerr("Cannot create compositor_capsfilter.\n");
 		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		gst_caps_unref(comp_filtercaps);
+		gst_structure_free(cdata->compstructure);
+		gst_caps_features_free(feat_comp);
 		gst_object_unref(cdata->nvvidconv);
 		return -1;
 	}
 
-	GstCaps *filtercaps = gst_caps_new_empty();
-	if (!filtercaps) {
-		g_printerr("Cannot create compositor_capsfilter.\n");
+	GstCaps *conv_filtercaps = gst_caps_new_empty();
+	if (!conv_filtercaps) {
+		g_printerr("Cannot create compositor_convcapsfilter.\n");
 		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		gst_caps_unref(comp_filtercaps);
+		gst_structure_free(cdata->compstructure);
+		gst_caps_features_free(feat_comp);
 		gst_object_unref(cdata->nvvidconv);
 		gst_object_unref(cdata->nvvidconv_caps);
 		return -1;
@@ -418,28 +469,40 @@ make_compositor_stream(struct compositor_data_t *cdata)
 	if (!cdata->convstructure) {
 		g_printerr("Unable to create caps.\n");
 		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		gst_caps_unref(comp_filtercaps);
+		gst_structure_free(cdata->compstructure);
+		gst_caps_features_free(feat_comp);
 		gst_object_unref(cdata->nvvidconv);
 		gst_object_unref(cdata->nvvidconv_caps);
-		gst_caps_unref(filtercaps);
+		gst_caps_unref(conv_filtercaps);
 		return -1;
 	}
 
-	GstCapsFeatures *feat_comp = gst_caps_features_new("memory:NVMM", NULL);
-	if (!feat_comp) {
-		g_printerr("Unable to create feature.\n");
+	GstCapsFeatures *feat_conv = gst_caps_features_new("memory:NVMM", NULL);
+	if (!feat_conv) {
+		g_printerr("Unable to create vidconv feature.\n");
 		gst_object_unref(cdata->nvcompositor);
+		gst_object_unref(cdata->nvcompositor_caps);
+		gst_caps_unref(comp_filtercaps);
+		gst_structure_free(cdata->compstructure);
+		gst_caps_features_free(feat_comp);
 		gst_object_unref(cdata->nvvidconv);
 		gst_object_unref(cdata->nvvidconv_caps);
-		gst_caps_unref(filtercaps);
+		gst_caps_unref(conv_filtercaps);
 		gst_structure_free(cdata->convstructure);
 		return -1;
 	}
-	gst_caps_append_structure_full(filtercaps, cdata->convstructure, feat_comp);
 
-	g_object_set(G_OBJECT(cdata->nvvidconv_caps), "caps", filtercaps, NULL);
+	gst_caps_append_structure_full(comp_filtercaps, cdata->compstructure, feat_comp);
+	g_object_set(G_OBJECT(cdata->nvcompositor_caps), "caps", comp_filtercaps, NULL);
+
+	gst_caps_append_structure_full(conv_filtercaps, cdata->convstructure, feat_conv);
+	g_object_set(G_OBJECT(cdata->nvvidconv_caps), "caps", conv_filtercaps, NULL);
 
 	/* cleanup */
-	gst_caps_unref(filtercaps);
+	gst_caps_unref(comp_filtercaps);
+	gst_caps_unref(conv_filtercaps);
 	// gst_structure_free(cdata->convstructure);
 
 	return 0;
@@ -786,9 +849,10 @@ video_pip_start(void)
 	gst_bin_add_many(GST_BIN(pipeline), cam_back.source, cam_back.source_capsfilter,
 			 cam_back.jpegparse, cam_back.jpegdec, cam_back.crop, cam_back.vidconv,
 			 cam_back.vidconv_capsfilter, NULL);
-	gst_bin_add_many(GST_BIN(pipeline), compositor.nvcompositor, compositor.nvvidconv,
-			 compositor.nvvidconv_caps, pip_encoder.encoder, pip_encoder.parser,
-			 pip_encoder.rtppay, pip_encoder.rtpfec, udpsink.udpsink, NULL);
+	gst_bin_add_many(GST_BIN(pipeline), compositor.nvcompositor, compositor.nvcompositor_caps,
+			 compositor.nvvidconv, compositor.nvvidconv_caps, pip_encoder.encoder,
+			 pip_encoder.parser, pip_encoder.rtppay, pip_encoder.rtpfec,
+			 udpsink.udpsink, NULL);
 
 	/* linking source1 */
 	if (gst_element_link_many(cam_front.source, cam_front.source_capsfilter,
@@ -817,10 +881,10 @@ video_pip_start(void)
 	}
 
 	/* linking compositor with sink */
-	if (gst_element_link_many(compositor.nvcompositor, compositor.nvvidconv,
-				  compositor.nvvidconv_caps, pip_encoder.encoder,
-				  pip_encoder.parser, pip_encoder.rtppay, pip_encoder.rtpfec,
-				  udpsink.udpsink, NULL) != TRUE) {
+	if (gst_element_link_many(compositor.nvcompositor, compositor.nvcompositor_caps,
+				  compositor.nvvidconv, compositor.nvvidconv_caps,
+				  pip_encoder.encoder, pip_encoder.parser, pip_encoder.rtppay,
+				  pip_encoder.rtpfec, udpsink.udpsink, NULL) != TRUE) {
 		g_printerr("Compositor could not be linked to sink.\n");
 		gst_object_unref(pipeline);
 		cleanup_usb_cam_source_stream(&cam_front);
