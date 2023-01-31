@@ -24,23 +24,21 @@
 /* PIP:
  * gst-launch-1.0 \
  *	nvcompositor name=comp \
- *	sink_0::xpos=0 sink_0::ypos=0 sink_0::width=480 sink_0::height=360  \
+ *	sink_0::xpos=0 sink_0::ypos=0 sink_0::width=480 sink_0::height=360 \
  *	sink_1::xpos=480 sink_1::ypos=0 sink_1::width=480 sink_1::height=360 ! \
  *	'video/x-raw(memory:NVMM),format=RGBA' ! \
- *	nvvidconv ! 'video/x-raw(memory:NVMM),format=I420' ! \
+ *	nvvidconv ! 'video/x-raw(memory:NVMM),format=NV12' ! \
  *	nvv4l2h264enc bitrate=512000 iframeinterval=60 preset-level=1 ! \
  *	h264parse ! rtph264pay config-interval=1 mtu=1420 pt=96 ! \
  *	udpsink host=192.168.50.100 port=5601 sync=false async=false \
- *
- *	v4l2src device=/dev/video1 ! image/jpeg,width=1024,height=768,framerate=30/1 ! \
- *	jpegparse ! jpegdec ! \
- *	videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv ! \
- *	'video/x-raw(memory:NVMM),format=RGBA' ! comp.sink_0 \
- *
- *	v4l2src device=/dev/video2 ! image/jpeg,width=1024,height=768,framerate=30/1 ! \
- *	jpegparse ! jpegdec ! \
+ *	v4l2src io-mode=2 device=/dev/video1 ! image/jpeg,width=1024,height=768,framerate=30/1 !
+ *	jpegdec idct-method=2 ! 'video/x-raw' ! \
  *	videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv !
- *	'video/x-raw(memory:NVMM),format=RGBA' ! comp.sink_1
+ *	'video/x-raw(memory:NVMM),format=RGBA' ! queue ! comp.sink_0 \
+ *	v4l2src io-mode=2 device=/dev/video2 ! image/jpeg,width=1024,height=768,framerate=30/1 !
+ *	jpegdec idct-method=2 ! 'video/x-raw' ! \
+ *	 videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv !
+ *	'video/x-raw(memory:NVMM),format=RGBA' ! queue ! comp.sink_1
  */
 /* использование nvjpegdec дает мегафризы c 0.01 фпс, поэтому обычный jpegdec */
 
@@ -147,17 +145,19 @@ enum usb_cam_type_t { CAMERA_FRONT, CAMERA_BACK };
 struct usb_cam_src_data_t {
 	GstElement *source;
 	GstElement *source_capsfilter;
-	GstElement *jpegparse;
 	GstElement *jpegdec;
+	GstElement *jpegdec_capsfilter;
 	GstElement *crop;
 	GstElement *vidconv;
 	GstElement *vidconv_capsfilter;
+	GstElement *sink_queue;
 };
 
 /* v4l2src device=%s ! image/jpeg,width=%u,height=%u,framerate=30/1 ! \
- * jpegparse ! jpegdec ! \
+ * jpegdec idct-method=2 ! 'video/x-raw' ! \
  * videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv flip=%u ! \
- * 'video/x-raw(memory:NVMM),format=RGBA'
+ * 'video/x-raw(memory:NVMM),format=RGBA' ! \
+ * queue
  */
 
 static int
@@ -167,25 +167,28 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 	static const struct {
 		const gchar *srcname;
 		const gchar *capsname;
-		const gchar *jpegparsename;
 		const gchar *jpegdecname;
+		const gchar *jpegdeccapsname;
 		const gchar *cropname;
 		const gchar *vidconvname;
 		const gchar *vidconvcapsname;
+		const gchar *queuename;
 	} names[] = {[CAMERA_FRONT] = {.srcname = "source_front",
 				       .capsname = "capsfilter_front",
-				       .jpegparsename = "jpegparse_front",
 				       .jpegdecname = "jpegdec_front",
+				       .jpegdeccapsname = "jpegdec_capsfilter_front",
 				       .cropname = "videocrop_front",
 				       .vidconvname = "vidconv_front",
-				       .vidconvcapsname = "vidconvcapsfilter_front"},
+				       .vidconvcapsname = "vidconvcapsfilter_front",
+				       .queuename = "conv_queue_front"},
 		     [CAMERA_BACK] = {.srcname = "source_back",
 				      .capsname = "capsfilter_back",
-				      .jpegparsename = "jpegparse_back",
 				      .jpegdecname = "jpegdec_back",
+				      .jpegdeccapsname = "jpegdec_capsfilter_back",
 				      .cropname = "videocrop_back",
 				      .vidconvname = "vidconv_back",
-				      .vidconvcapsname = "vidconvcapsfilter_back"}};
+				      .vidconvcapsname = "vidconvcapsfilter_back",
+				      .queuename = "conv_queue_back"}};
 
 	cdata->source = gst_element_factory_make("v4l2src", names[ctype].srcname);
 	if (!cdata->source) {
@@ -220,16 +223,6 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		return -1;
 	}
 
-	cdata->jpegparse = gst_element_factory_make("jpegparse", names[ctype].jpegparsename);
-	if (!cdata->jpegparse) {
-		g_printerr("Cannot create jpegparse.\n");
-		gst_object_unref(cdata->source);
-		gst_object_unref(cdata->source_capsfilter);
-		gst_caps_unref(gstcaps);
-		gst_structure_free(srcstructure);
-		return -1;
-	}
-
 	cdata->jpegdec = gst_element_factory_make("jpegdec", names[ctype].jpegdecname);
 	if (!cdata->jpegdec) {
 		g_printerr("Cannot create jpegdec.\n");
@@ -237,8 +230,43 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_object_unref(cdata->source_capsfilter);
 		gst_caps_unref(gstcaps);
 		gst_structure_free(srcstructure);
-		gst_object_unref(cdata->jpegparse);
 		return -1;
+	}
+
+	cdata->jpegdec_capsfilter =
+	    gst_element_factory_make("capsfilter", names[ctype].jpegdeccapsname);
+	if (!cdata->jpegdec_capsfilter) {
+		g_printerr("Cannot create jpegdec capsfilter.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(srcstructure);
+		gst_object_unref(cdata->jpegdec);
+		return -1;
+	}
+
+	GstCaps *jpegdec_gstcaps = gst_caps_new_empty();
+	if (!jpegdec_gstcaps) {
+		g_printerr("Cannot create jpegdec_gstcaps.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(srcstructure);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		return -1;
+	}
+
+	GstStructure *jpegdec_structure = gst_structure_new_empty("video/x-raw");
+	if (!jpegdec_structure) {
+		g_printerr("Cannot create jpegdec_structure.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(srcstructure);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
 	}
 
 	cdata->crop = gst_element_factory_make("videocrop", names[ctype].cropname);
@@ -248,8 +276,10 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_object_unref(cdata->source_capsfilter);
 		gst_caps_unref(gstcaps);
 		gst_structure_free(srcstructure);
-		gst_object_unref(cdata->jpegparse);
 		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
+		gst_structure_free(jpegdec_structure);
 		return -1;
 	}
 
@@ -260,8 +290,10 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_object_unref(cdata->source_capsfilter);
 		gst_caps_unref(gstcaps);
 		gst_structure_free(srcstructure);
-		gst_object_unref(cdata->jpegparse);
 		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
+		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		return -1;
 	}
@@ -277,8 +309,10 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_object_unref(cdata->source_capsfilter);
 		gst_caps_unref(gstcaps);
 		gst_structure_free(srcstructure);
-		gst_object_unref(cdata->jpegparse);
 		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
+		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		gst_object_unref(cdata->vidconv);
 	}
@@ -291,8 +325,10 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_object_unref(cdata->source_capsfilter);
 		gst_caps_unref(gstcaps);
 		gst_structure_free(srcstructure);
-		gst_object_unref(cdata->jpegparse);
 		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
+		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		gst_object_unref(cdata->vidconv);
 		gst_structure_free(vidconv_structure);
@@ -306,8 +342,28 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_object_unref(cdata->source_capsfilter);
 		gst_caps_unref(gstcaps);
 		gst_structure_free(srcstructure);
-		gst_object_unref(cdata->jpegparse);
 		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
+		gst_structure_free(jpegdec_structure);
+		gst_object_unref(cdata->crop);
+		gst_object_unref(cdata->vidconv);
+		gst_structure_free(vidconv_structure);
+		gst_caps_features_free(vidconv_features);
+		return -1;
+	}
+
+	cdata->sink_queue = gst_element_factory_make("queue", names[ctype].queuename);
+	if (!cdata->sink_queue) {
+		g_printerr("Cannot create queue.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(srcstructure);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
+		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		gst_object_unref(cdata->vidconv);
 		gst_structure_free(vidconv_structure);
@@ -322,6 +378,12 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 	gst_caps_append_structure(gstcaps, srcstructure);
 	g_object_set(G_OBJECT(cdata->source_capsfilter), "caps", gstcaps, NULL);
 	gst_caps_unref(gstcaps);
+
+	g_object_set(cdata->jpegdec, "idct-method", 2, NULL);
+	/* add 'video/x-raw' to jpegdec */
+	gst_caps_append_structure(jpegdec_gstcaps, jpegdec_structure);
+	g_object_set(cdata->jpegdec_capsfilter, "caps", jpegdec_gstcaps, NULL);
+	gst_caps_unref(jpegdec_gstcaps);
 
 	/* set videocrop params */
 	g_object_set(cdata->crop, "top", 0, NULL);
@@ -352,20 +414,13 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 static void
 cleanup_usb_cam_source_stream(struct usb_cam_src_data_t *cdata)
 {
-	log_dbg("cleanup cdata->source");
 	gst_object_unref(cdata->source);
-	log_dbg("cleanup cdata->source_capsfilter");
 	gst_object_unref(cdata->source_capsfilter);
-	log_dbg("cleanup cdata->jpegparse");
-	gst_object_unref(cdata->jpegparse);
-	log_dbg("cleanup cdata->jpegdec");
 	gst_object_unref(cdata->jpegdec);
-	log_dbg("cleanup cdata->crop");
 	gst_object_unref(cdata->crop);
-	log_dbg("cleanup cdata->vidconv");
 	gst_object_unref(cdata->vidconv);
-	log_dbg("cleanup cdata->vidconv_capsfilter");
 	gst_object_unref(cdata->vidconv_capsfilter);
+	gst_object_unref(cdata->sink_queue);
 }
 
 struct compositor_data_t {
@@ -844,20 +899,22 @@ video_pip_start(void)
 
 	/* Build the pipeline */
 	gst_bin_add_many(GST_BIN(pipeline), cam_front.source, cam_front.source_capsfilter,
-			 cam_front.jpegparse, cam_front.jpegdec, cam_front.crop, cam_front.vidconv,
-			 cam_front.vidconv_capsfilter, NULL);
+			 cam_front.jpegdec, cam_front.jpegdec_capsfilter, cam_front.crop,
+			 cam_front.vidconv, cam_front.vidconv_capsfilter, cam_front.sink_queue,
+			 NULL);
 	gst_bin_add_many(GST_BIN(pipeline), cam_back.source, cam_back.source_capsfilter,
-			 cam_back.jpegparse, cam_back.jpegdec, cam_back.crop, cam_back.vidconv,
-			 cam_back.vidconv_capsfilter, NULL);
+			 cam_back.jpegdec, cam_back.jpegdec_capsfilter, cam_back.crop,
+			 cam_back.vidconv, cam_back.vidconv_capsfilter, cam_back.sink_queue, NULL);
 	gst_bin_add_many(GST_BIN(pipeline), compositor.nvcompositor, compositor.nvcompositor_caps,
 			 compositor.nvvidconv, compositor.nvvidconv_caps, pip_encoder.encoder,
 			 pip_encoder.parser, pip_encoder.rtppay, pip_encoder.rtpfec,
 			 udpsink.udpsink, NULL);
 
 	/* linking source1 */
-	if (gst_element_link_many(cam_front.source, cam_front.source_capsfilter,
-				  cam_front.jpegparse, cam_front.jpegdec, cam_front.crop,
-				  cam_front.vidconv, cam_front.vidconv_capsfilter, NULL) != TRUE) {
+	if (gst_element_link_many(cam_front.source, cam_front.source_capsfilter, cam_front.jpegdec,
+				  cam_front.jpegdec_capsfilter, cam_front.crop, cam_front.vidconv,
+				  cam_front.vidconv_capsfilter, cam_front.sink_queue,
+				  NULL) != TRUE) {
 		g_printerr("source1 could not be linked to conv1.\n");
 		gst_object_unref(pipeline);
 		cleanup_usb_cam_source_stream(&cam_front);
@@ -868,9 +925,9 @@ video_pip_start(void)
 	}
 
 	/* linking source2 */
-	if (gst_element_link_many(cam_back.source, cam_back.source_capsfilter, cam_back.jpegparse,
-				  cam_back.jpegdec, cam_back.crop, cam_back.vidconv,
-				  cam_back.vidconv_capsfilter, NULL) != TRUE) {
+	if (gst_element_link_many(cam_back.source, cam_back.source_capsfilter, cam_back.jpegdec,
+				  cam_back.jpegdec_capsfilter, cam_back.crop, cam_back.vidconv,
+				  cam_back.vidconv_capsfilter, cam_back.sink_queue, NULL) != TRUE) {
 		g_printerr("source2 could not be linked to conv2.\n");
 		gst_object_unref(pipeline);
 		cleanup_usb_cam_source_stream(&cam_front);
@@ -895,10 +952,10 @@ video_pip_start(void)
 	}
 
 	/* connect source1 to compositor */
-	connect_to_compositor(cam_front.vidconv_capsfilter, &compositor, 0);
+	connect_to_compositor(cam_front.sink_queue, &compositor, 0);
 
 	/* connect source2 to compositor */
-	connect_to_compositor(cam_back.vidconv_capsfilter, &compositor, VIDEO_PIP_W);
+	connect_to_compositor(cam_back.sink_queue, &compositor, VIDEO_PIP_W);
 
 	/* Start playing */
 	ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
