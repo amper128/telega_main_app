@@ -55,7 +55,7 @@
 #define VIDEO_W (1280)
 #define VIDEO_H (720)
 #define VIDEO_FPS (30)
-#define BITRATE (2500000)
+#define BITRATE (3000000)
 #define FEC_PERCENT (25)
 
 #define VIDEO_PIP_W (480)
