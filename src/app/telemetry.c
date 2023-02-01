@@ -134,6 +134,8 @@ read_drives_status(RC_td_t *td)
 		td->drives[i].temp_fet_X10 = p.s->dt[i].temp_fet_X10;
 		td->drives[i].temp_motor_X10 = p.s->dt[i].temp_motor_X10;
 	}
+
+	td->mode = p.s->mode;
 }
 
 static void

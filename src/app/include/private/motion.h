@@ -34,6 +34,7 @@ typedef struct {
 
 typedef struct {
 	drive_telemetry_t dt[DRIVES_COUNT];
+	uint32_t mode;
 } motion_telemetry_t;
 
 int motion_init(void);

@@ -59,7 +59,19 @@ static shm_t motion_telemetry_shm;
 
 static motion_telemetry_t mt;
 
+/* текущий счетчик времени */
+static uint64_t cur_mono;
+
 static int servo_fd;
+
+enum drive_mode_t {
+	DRIVE_MODE_FREE, /* freewheel */
+	DRIVE_MODE_DRIVE /* parking, drive, reverse */
+};
+
+static enum drive_mode_t dmode = DRIVE_MODE_FREE;
+static enum drive_mode_t cached_dmode = DRIVE_MODE_FREE;
+static uint64_t last_drv_can_tx;
 
 /**
  * @brief ограничение значения в указанных пределах
@@ -194,7 +206,12 @@ parse_msg(const struct can_packet_t *msg)
 {
 	uint8_t drive_id = msg->hdr.id;
 	if (drive_id >= DRIVES_COUNT) {
-		log_warn("unknown drive ID %u", drive_id);
+		if (msg->hdr.cmd == (uint8_t)VESC_CAN_PACKET_PONG) {
+			/* do nothing */
+			return;
+		}
+		log_warn("unknown msg from drive ID %u", drive_id);
+		log_warn("cmd 0x%02x, len %u", msg->hdr.cmd, msg->len);
 		return;
 	}
 
@@ -309,8 +326,14 @@ parse_msg(const struct can_packet_t *msg)
 		break;
 	}
 
+	case (uint8_t)VESC_CAN_PACKET_PONG: {
+		/* do nothing */
+		break;
+	}
+
 	default:
-		log_inf("recv: from=%X, cmd=%x, data_len=%u", msg->hdr.id, msg->hdr.cmd, msg->len);
+		log_inf("recv: from=0x%02X, cmd=0x%02x, data_len=%u", msg->hdr.id, msg->hdr.cmd,
+			msg->len);
 		break;
 	}
 }
@@ -331,19 +354,66 @@ set_drv_duty(uint8_t drv_id, float duty)
 	vesc_write_i32(conv, msg.data);
 	msg.len = sizeof(conv);
 	send_can_msg(&msg);
+
+	last_drv_can_tx = cur_mono;
 }
 
 static void
-do_motion(float speed, float steering)
+drv_free(uint8_t drv_id)
 {
-	struct can_packet_t msg;
+	struct can_packet_t msg = {
+	    0,
+	};
 
-	while (read_can_msg(&msg)) {
-		parse_msg(&msg);
+	msg.hdr.cmd = (uint8_t)VESC_CAN_PACKET_SET_CURRENT;
+	msg.hdr.id = drv_id;
+
+	int32_t conv = 0;
+	vesc_write_i32(conv, msg.data);
+	msg.len = sizeof(conv);
+	send_can_msg(&msg);
+
+	last_drv_can_tx = cur_mono;
+}
+
+static void
+drv_keepalive(uint8_t drv_id)
+{
+	struct can_packet_t msg = {
+	    0,
+	};
+
+	msg.hdr.cmd = (uint8_t)VESC_CAN_PACKET_PING;
+	msg.hdr.id = drv_id;
+	msg.len = 0U;
+	send_can_msg(&msg);
+
+	last_drv_can_tx = cur_mono;
+}
+
+static void
+do_freedrive(void)
+{
+	if (cached_dmode != dmode) {
+		uint8_t i;
+		for (i = 0U; i < DRIVES_COUNT; i++) {
+			drv_free(i);
+		}
+		cached_dmode = dmode;
+	} else {
+		if ((cur_mono - last_drv_can_tx) >= (50ULL * TIME_MS)) {
+			/* send keepalive */
+			uint8_t i;
+			for (i = 0U; i < DRIVES_COUNT; i++) {
+				drv_keepalive(i);
+			}
+		}
 	}
+}
 
-	shm_map_write(&motion_telemetry_shm, &mt, sizeof(mt));
-
+static void
+do_drive(float speed, float steering)
+{
 	if (fabsf(speed) < DEADZONE) {
 		speed = 0.0f;
 	} else {
@@ -366,6 +436,7 @@ do_motion(float speed, float steering)
 
 	speed = flimit(speed, 1.0f, -1.0f);
 	steering = flimit(steering, 1.0f, -1.0f);
+
 	static const float plimit = 0.25f;
 
 	float left;
@@ -419,25 +490,31 @@ do_motion(float speed, float steering)
 
 	/* like ESP */
 	static float sd[DRIVES_COUNT] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
-	float lmin = (float)abs(mt.dt[0].rpm);
-	float rmin = (float)abs(mt.dt[1].rpm);
+	/* cast from function ... */
+	int rpm;
+	rpm = abs(mt.dt[0].rpm);
+	float lmin = (float)rpm;
+	rpm = abs(mt.dt[1].rpm);
+	float rmin = (float)rpm;
 
 	size_t i;
 	size_t idx;
 	for (i = 1U; i < 3U; i++) {
 		/* left */
 		idx = i * 2U;
-		if ((float)abs(mt.dt[idx].rpm) < lmin) {
+		rpm = abs(mt.dt[idx].rpm);
+		if ((float)rpm < lmin) {
 			if (sd[idx] > 0.99f) {
-				lmin = (float)abs(mt.dt[idx].rpm);
+				lmin = (float)rpm;
 			}
 		}
 
 		/* right */
 		idx = (i * 2U) + 1U;
-		if ((float)abs(mt.dt[idx].rpm) < rmin) {
+		rpm = abs(mt.dt[idx].rpm);
+		if ((float)rpm < rmin) {
 			if (sd[idx] > 0.99f) {
-				rmin = (float)abs(mt.dt[idx].rpm);
+				rmin = (float)rpm;
 			}
 		}
 	}
@@ -446,7 +523,8 @@ do_motion(float speed, float steering)
 		/* left */
 		idx = i * 2U;
 		if (abs(mt.dt[idx].rpm) >= 5) {
-			if (lmin / (float)abs(mt.dt[idx].rpm) < 0.9f) {
+			rpm = abs(mt.dt[idx].rpm);
+			if (lmin / (float)rpm < 0.9f) {
 				sd[idx] -= 0.05f;
 			} else {
 				sd[idx] += 0.05f;
@@ -459,7 +537,8 @@ do_motion(float speed, float steering)
 		/* right */
 		idx = (i * 2U) + 1U;
 		if (abs(mt.dt[idx].rpm) >= 5) {
-			if (rmin / (float)abs(mt.dt[idx].rpm) < 0.9f) {
+			rpm = abs(mt.dt[idx].rpm);
+			if (rmin / (float)rpm < 0.9f) {
 				sd[idx] -= 0.05f;
 			} else {
 				sd[idx] += 0.05f;
@@ -802,6 +881,7 @@ struct rc_data_t {
 	int16_t axis[6];
 	uint16_t buttons[4];
 	int8_t sq;
+	int8_t _pad;
 };
 
 static void
@@ -920,7 +1000,7 @@ motion_main(void)
 		uint32_t l_counter = 0U;
 
 		while (svc_cycle()) {
-			uint64_t mono = svc_get_monotime();
+			cur_mono = svc_get_monotime();
 			uint8_t rc_data[512];
 
 			do {
@@ -929,7 +1009,6 @@ motion_main(void)
 					     (struct sockaddr *)&rc_sockaddr, &slen_rc);
 
 				if (data_len > 0) {
-
 					union {
 						struct rc_data_t *r;
 						uint8_t *u8;
@@ -942,12 +1021,20 @@ motion_main(void)
 					speed = (float)(r.r->axis[1] - 1500) / 500.0f;
 					steering = (float)(r.r->axis[0] - 1500) / 500.0f;
 
+					if ((r.r->axis[0] != 1500) || (r.r->axis[1] != 1500)) {
+						dmode = DRIVE_MODE_DRIVE;
+					}
+
+					if (r.r->buttons[1] & BTN_D1) {
+						dmode = DRIVE_MODE_FREE;
+					}
+
 					head_brightness = (float)(r.r->axis[4] - 1500) / 500.0f;
 					if (head_brightness < 0.0f) {
 						head_brightness = 0.0f;
 					}
 
-					last_rc_rx = mono;
+					last_rc_rx = cur_mono;
 					rc_connected = true;
 				} else {
 					break;
@@ -956,7 +1043,7 @@ motion_main(void)
 
 			if (rc_connected) {
 				/* проверка что связь с центром не потеряна */
-				if ((mono - last_rc_rx) > (500ULL * TIME_MS)) {
+				if ((cur_mono - last_rc_rx) > (500ULL * TIME_MS)) {
 					log_warn("RC connection lost! Stop drone!");
 
 					speed = 0;
@@ -965,7 +1052,22 @@ motion_main(void)
 				}
 			}
 
-			do_motion(speed, steering);
+			/* парсим входящие сообщения */
+			struct can_packet_t msg;
+			while (read_can_msg(&msg)) {
+				parse_msg(&msg);
+			}
+			mt.mode = (uint32_t)dmode;
+			shm_map_write(&motion_telemetry_shm, &mt, sizeof(mt));
+
+			switch (dmode) {
+			case DRIVE_MODE_DRIVE:
+				do_drive(speed, steering);
+				break;
+			case DRIVE_MODE_FREE:
+			default:
+				do_freedrive();
+			}
 
 			control_side_lights(rc_connected);
 			control_tail_lights(speed);

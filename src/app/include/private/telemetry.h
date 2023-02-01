@@ -72,6 +72,8 @@ typedef struct {
 		int16_t __reserved[2U];
 	} drives[DRIVES_COUNT];
 
+	uint32_t mode;
+
 	uint16_t CRC;
 } RC_td_t;
 
