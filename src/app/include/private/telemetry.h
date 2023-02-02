@@ -69,7 +69,8 @@ typedef struct {
 		int16_t duty_X10;
 		int16_t temp_fet_X10;
 		int16_t temp_motor_X10;
-		int16_t __reserved[2U];
+		int16_t epower_X10;
+		int16_t __reserved[1U];
 	} drives[DRIVES_COUNT];
 
 	uint32_t mode;

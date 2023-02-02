@@ -133,6 +133,10 @@ read_drives_status(RC_td_t *td)
 		td->drives[i].duty_X10 = p.s->dt[i].duty_X10;
 		td->drives[i].temp_fet_X10 = p.s->dt[i].temp_fet_X10;
 		td->drives[i].temp_motor_X10 = p.s->dt[i].temp_motor_X10;
+		conv = p.s->dt[i].v_in_X10;
+		conv *= p.s->dt[i].current_in_X10;
+		conv /= 100.0;
+		td->drives[i].epower_X10 = (int16_t)(conv * 10.0);
 	}
 
 	td->mode = p.s->mode;
