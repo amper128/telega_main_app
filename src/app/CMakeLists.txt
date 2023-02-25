@@ -13,11 +13,15 @@ pkg_check_modules(DBUS REQUIRED dbus-glib-1)
 
 pkg_check_modules(GIO REQUIRED gio-2.0)
 
+pkg_search_module(OPUS REQUIRED opus)
+pkg_check_modules(PULSE REQUIRED libpulse)
+pkg_check_modules(PULSE_SIMPLE REQUIRED libpulse-simple)
+
 file(GLOB_RECURSE app_headers "include/*.h")
 file(GLOB_RECURSE global_headers "${PROJECT_SOURCE_DIR}/include/*.h")
 
 add_executable(${PROJECT_NAME}
-	audio.c
+	audio_stream.c
 	gps.c
 	main.c
 	minmea.c
@@ -37,6 +41,9 @@ target_include_directories(${PROJECT_NAME}
 		${GLIB2_INCLUDE_DIRS}
 		${GSTREAMER_INCLUDE_DIRS}
 		${DBUS_INCLUDE_DIRS}
+		${OPUS_INCLUDE_DIRS}
+		${PULSE_INCLUDE_DIRS}
+		${PULSE_SIMPLE_INCLUDE_DIRS}
 	)
 
 target_link_libraries(${PROJECT_NAME}
@@ -48,4 +55,8 @@ target_link_libraries(${PROJECT_NAME}
 		${GST_VIDEO_LIBRARIES}
 		${DBUS_LIBRARIES}
 		${GIO_LIBRARIES}
+		mp3lame
+		${OPUS_LIBRARIES}
+		${PULSE_LIBRARIES}
+		${PULSE_SIMPLE_LIBRARIES}
 	)
