@@ -298,6 +298,22 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		return -1;
 	}
 
+	GstCaps *vidconv_gstcaps = gst_caps_new_empty();
+	if (!vidconv_gstcaps) {
+		g_printerr("Cannot create vidconv_gstcaps.\n");
+		gst_object_unref(cdata->source);
+		gst_object_unref(cdata->source_capsfilter);
+		gst_caps_unref(gstcaps);
+		gst_structure_free(srcstructure);
+		gst_object_unref(cdata->jpegdec);
+		gst_object_unref(cdata->jpegdec_capsfilter);
+		gst_caps_unref(jpegdec_gstcaps);
+		gst_structure_free(jpegdec_structure);
+		gst_object_unref(cdata->crop);
+		gst_object_unref(cdata->vidconv);
+		return -1;
+	}
+
 	GstStructure *vidconv_structure;
 	/*vidconv_structure = gst_structure_new(
 	    "video/x-raw", "framerate", GST_TYPE_FRACTION, VIDEO_FPS, 1, "format", G_TYPE_STRING,
@@ -315,6 +331,7 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		gst_object_unref(cdata->vidconv);
+		gst_caps_unref(vidconv_gstcaps);
 	}
 
 	GstCapsFeatures *vidconv_features;
@@ -331,6 +348,7 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		gst_object_unref(cdata->vidconv);
+		gst_caps_unref(vidconv_gstcaps);
 		gst_structure_free(vidconv_structure);
 	}
 
@@ -348,6 +366,7 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		gst_object_unref(cdata->vidconv);
+		gst_caps_unref(vidconv_gstcaps);
 		gst_structure_free(vidconv_structure);
 		gst_caps_features_free(vidconv_features);
 		return -1;
@@ -366,6 +385,7 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 		gst_structure_free(jpegdec_structure);
 		gst_object_unref(cdata->crop);
 		gst_object_unref(cdata->vidconv);
+		gst_caps_unref(vidconv_gstcaps);
 		gst_structure_free(vidconv_structure);
 		gst_caps_features_free(vidconv_features);
 		return -1;
@@ -400,13 +420,11 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 	g_object_set(cdata->vidconv, "flip-method", flipmode, NULL);
 
 	/* add 'memory:NVMM' to 'video/x-raw' */
-	gst_caps_append_structure_full(gstcaps, vidconv_structure, vidconv_features);
+	gst_caps_append_structure_full(vidconv_gstcaps, vidconv_structure, vidconv_features);
 
 	/* apply 'video/x-raw' caps */
-	g_object_set(cdata->vidconv_capsfilter, "caps", gstcaps, NULL);
-
-	/* cleanup */
-	gst_caps_unref(gstcaps);
+	g_object_set(cdata->vidconv_capsfilter, "caps", vidconv_gstcaps, NULL);
+	gst_caps_unref(vidconv_gstcaps);
 
 	return 0;
 }
