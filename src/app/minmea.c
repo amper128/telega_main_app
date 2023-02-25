@@ -39,7 +39,7 @@ minmea_checksum(const char *sentence)
 
 	// The optional checksum is an XOR of all bytes between "$" and "*".
 	while (*sentence && *sentence != '*')
-		checksum ^= *sentence++;
+		checksum ^= (uint8_t)*sentence++;
 
 	return checksum;
 }
@@ -59,7 +59,7 @@ minmea_check(const char *sentence, bool strict)
 
 	// The optional checksum is an XOR of all bytes between "$" and "*".
 	while (*sentence && *sentence != '*' && isprint((unsigned char)*sentence))
-		checksum ^= *sentence++;
+		checksum ^= (uint8_t)*sentence++;
 
 	// If checksum is present...
 	if (*sentence == '*') {

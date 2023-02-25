@@ -207,7 +207,7 @@ parse_line(const char *line)
 					frame.sats[i].snr);
 			}*/
 
-			tmp_gps_status.sats_view = frame.total_sats;
+			tmp_gps_status.sats_view = (uint8_t)frame.total_sats;
 		} else {
 			log_warn("$xxGSV sentence is not parsed");
 		}
@@ -255,7 +255,7 @@ parse_line(const char *line)
 static void
 sendUBX(const unsigned char *progmemBytes, size_t len, int gps_fd)
 {
-	char buf[64];
+	unsigned char buf[64];
 	size_t buf_len = 2U;
 
 	buf[0] = 0xB5;
