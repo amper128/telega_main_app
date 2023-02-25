@@ -32,11 +32,11 @@
  *	h264parse ! rtph264pay config-interval=1 mtu=1420 pt=96 ! \
  *	udpsink host=192.168.50.100 port=5601 sync=false async=false \
  *	v4l2src io-mode=2 device=/dev/video1 ! image/jpeg,width=1024,height=768,framerate=30/1 !
- *	jpegdec idct-method=2 ! 'video/x-raw' ! \
+ *	jpegdec idct-method=1 ! 'video/x-raw' ! \
  *	videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv !
  *	'video/x-raw(memory:NVMM),format=RGBA' ! queue ! comp.sink_0 \
  *	v4l2src io-mode=2 device=/dev/video2 ! image/jpeg,width=1024,height=768,framerate=30/1 !
- *	jpegdec idct-method=2 ! 'video/x-raw' ! \
+ *	jpegdec idct-method=1 ! 'video/x-raw' ! \
  *	 videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv !
  *	'video/x-raw(memory:NVMM),format=RGBA' ! queue ! comp.sink_1
  */
@@ -154,7 +154,7 @@ struct usb_cam_src_data_t {
 };
 
 /* v4l2src device=%s ! image/jpeg,width=%u,height=%u,framerate=30/1 ! \
- * jpegdec idct-method=2 ! 'video/x-raw' ! \
+ * jpegdec idct-method=1 ! 'video/x-raw' ! \
  * videocrop top=0 left=96 right=96 bottom=0 ! nvvidconv flip=%u ! \
  * 'video/x-raw(memory:NVMM),format=RGBA' ! \
  * queue
@@ -392,14 +392,14 @@ make_usb_cam_source_stream(struct usb_cam_src_data_t *cdata, enum usb_cam_type_t
 	}
 
 	/* set 'device=%s' to v4l2src */
-	g_object_set(cdata->source, "device", devname, NULL);
+	g_object_set(cdata->source, "device", devname, "io-mode", 2, NULL);
 
 	/* add 'image/jpeg,width=%u,height=%u,framerate=30/1' to v4l2src */
 	gst_caps_append_structure(gstcaps, srcstructure);
 	g_object_set(G_OBJECT(cdata->source_capsfilter), "caps", gstcaps, NULL);
 	gst_caps_unref(gstcaps);
 
-	g_object_set(cdata->jpegdec, "idct-method", 2, NULL);
+	g_object_set(cdata->jpegdec, "idct-method", 1, NULL);
 	/* add 'video/x-raw' to jpegdec */
 	gst_caps_append_structure(jpegdec_gstcaps, jpegdec_structure);
 	g_object_set(cdata->jpegdec_capsfilter, "caps", jpegdec_gstcaps, NULL);
