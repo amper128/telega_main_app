@@ -28,7 +28,7 @@
 #define MAX_PACKET_SIZE (1400U)
 #define MAX_DATA_SIZE (MAX_PACKET_SIZE - sizeof(packet_header_t))
 
-#define UDP_PORT_AUDIO (5611)
+#define UDP_PORT_AUDIO (5610)
 
 static shm_t connect_status_shm;
 /* локальная копия флага наличия подключения */
