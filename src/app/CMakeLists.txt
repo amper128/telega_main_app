@@ -31,6 +31,7 @@ add_executable(${PROJECT_NAME}
 	system_telemetry.c
 	telemetry.c
 	video.c
+	voicestream.c
 	${app_headers}
 	${global_headers}
 	)

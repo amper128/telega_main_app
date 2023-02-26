@@ -23,6 +23,7 @@
 #include <private/system_telemetry.h>
 #include <private/telemetry.h>
 #include <private/video.h>
+#include <private/voicestream.h>
 
 #define SERVICES_MAX (32U)
 
@@ -110,9 +111,10 @@ start_microservices(void)
 		{"video", video_init, video_main, 10ULL * TIME_MS},
 		{"video_pip", video_init, video_pip_main, 10ULL * TIME_MS},
 		{"audio", audio_init, audio_main, 10ULL * TIME_MS},
+		{"voice", voice_init, voice_main, 0ULL},
 		{"netinfo", network_status_init, network_status_main, 1ULL * TIME_S},
 	    },
-	    9U};
+	    10U};
 
 	size_t i;
 
