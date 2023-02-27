@@ -82,7 +82,7 @@ init_capture(int rate, pa_sample_format_t format)
 	 * no matter what */
 	buffer_attr.prebuf = 0;
 	buffer_attr.minreq = (uint32_t)-1;
-	buffer_attr.fragsize = 0;
+	buffer_attr.fragsize = 8192U;
 	int err = 0;
 
 	rec = pa_simple_new(NULL,	    // Use the default server.
